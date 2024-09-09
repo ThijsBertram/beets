@@ -1,5 +1,5 @@
 from beets.ui import Subcommand
-from ..pipeline.custom_pipeline import CustomImportSession
+from ..pipelines.custom_pipeline import CustomImportSession
 
 # Define the CLI subcommand
 def custom_import_pipeline(lib, opts, args):

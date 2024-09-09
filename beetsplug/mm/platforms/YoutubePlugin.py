@@ -135,26 +135,34 @@ class YouTubePlugin(BeetsPlugin):
         if ' - Topic' in item['channel']:
             a = item['channel'].split('- Topic')[0].strip()
             title = a + ' - ' + title
-        # parse using CHAPPIE AGENT
-        # title, song_data = self.titleparser.send_gpt_request(args=[title])[0]
+        # PARSE USING SIMPLE PARSER
+        song_data = self.titleparser.extract_simple_ss(title)
+        # ELSE USE CHAPPIE OVERLORD
+        if not song_data:
+            title, song_data = self.titleparser.send_gpt_request(args=[title])[0]
+            song_data.pop('confidence')
 
 
         # ARTISTS
         artists = song_data.pop('artists')
         if song_data['feat_artist']:
             artists += [song_data['feat_artist']]
-        if song_data['remix_artist']:
-            artists += song_data['remix_artist']
+        if song_data['remixer']:
+            artists += song_data['remixer']
         # remove duplicates and substrings
         substrings = {a for a in artists for other in artists if a != other and a in other}
         artists = [a for a in artists if a not in substrings]
+        main_artist = artists[0]
         # sort
         artists = sorted(artists)
 
         # populate dict 
         song_data['youtube_id'] = item['youtube_id']
-        song_data['video_id'] = item['video_id']
+        # song_data['video_id'] = item['video_id']
         song_data['artists'] = artists
+        song_data['main_artist'] = main_artist
+
+
 
         return song_data
     
@@ -185,7 +193,7 @@ class YouTubePlugin(BeetsPlugin):
             try:
                 track_info['channel'] = video['snippet']['videoOwnerChannelTitle']
             except KeyError:
-                self._log.warning(f"{video['snippet']['title']} in playlist: {playlist_name}")
+                self._log.warning(f"{video['snippet']['title']} in playlist: {playlist_id}")
                 continue
 
             items.append(track_info)

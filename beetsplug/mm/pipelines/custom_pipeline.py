@@ -1,4 +1,4 @@
-from ..stages.fetch_data_stage import FetchPlatformData
+from ...muziekmachine.stages.fetch_data_stage import FetchPlatformData
 # from ..stages.generate_items_stage import GenerateBeetsItemsStage
 # from ..stages.sync_platforms_stage import SyncPlatformsStage
 # from ..stages.download_audiofile_stage import DownloadAudioStage

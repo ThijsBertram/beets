@@ -105,7 +105,7 @@ class SpotifyPlugin(BeetsPlugin):
         # populate dict
         song_data['artists'] = artists
         song_data['title'] = title
-        song_data['remix_artist'] = remix_artist
+        song_data['remixer'] = remix_artist
         song_data['remix_type'] = 'Remix' if remix_artist else ''
         song_data['spotify_id'] = spotify_id
         song_data['feat_artist'] = feat_artist
