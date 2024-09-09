@@ -603,6 +603,13 @@ class Item(LibModel):
         "channels": types.INTEGER,
         "mtime": DateType(),
         "added": DateType(),
+        "main_artist": types.STRING,
+        "feat_artist": types.STRING,
+        "remix_type": types.STRING,
+        "subgenre": types.STRING,
+        "spotify_id": types.STRING,
+        "youtube_id": types.STRING,
+        "last_edited": DateType()
     }
 
     _search_fields = (
