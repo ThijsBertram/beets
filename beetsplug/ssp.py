@@ -2,8 +2,12 @@ from beets.plugins import BeetsPlugin
 from beets.ui import Subcommand
 from beets import config
 from openai import OpenAI
+import sqlite3
 import time
 import json
+
+import re
+
 
 class OpenAICaller:
     def __init__(self, api_key, assistant_id):
@@ -118,8 +122,209 @@ class SongStringParser(BeetsPlugin):
         self.custom_gpt_command = Subcommand('ssp', help='Send request to OpenAI GPT')
         self.custom_gpt_command.func = self.send_gpt_request
 
+        self.known_artists = self.get_known_artists_from_db()
+
+
+    def get_known_artists_from_db(extract_duos_only=True):
+        # Connect to the SQLite database (change the connection method for other databases)
+        database_path = str(config['library'])
+        table_name = 'items'
+
+        conn = sqlite3.connect(database_path)
+        cursor = conn.cursor()
+        
+        # Query to get all rows in the 'artists' column
+        query = f"SELECT artists FROM {table_name}"
+        cursor.execute(query)
+        
+        # Set to store all unique artists
+        known_artists = set()
+
+        # Fetch all rows from the artists column
+        rows = cursor.fetchall()
+
+        # Iterate over each row (each row contains a single column 'artists')
+        for row in rows:
+            # Assume artists are separated by commas or the special string "\\␀"
+            artists_string = row[0]  # Extract the artists string from the tuple
+            
+            # Split the artists string by commas and the special string "\\␀"
+            try:
+                artists_list = re.split(r',|\\␀', artists_string)
+            except TypeError:
+                continue
+            # Strip whitespace and process each artist
+            for artist in artists_list:
+                artist = artist.strip()
+                if extract_duos_only:
+                    # Only add if the artist contains an '&' (artist duo)
+                    if '&' in artist:
+                        known_artists.add(artist)
+                else:
+                    # Add all artists
+                    known_artists.add(artist)
+        
+        # Close the database connection
+        conn.close()
+        
+        return list(known_artists)
+
     def commands(self):
         return [self.custom_gpt_command]
+    
+    def extract_simple_ss(self, song_string):
+
+        forbidden_characters = ['|']
+
+        for char in forbidden_characters:
+            if char in song_string:
+                return None
+
+
+
+        known_duos = self.known_artists
+        # Normalize known duos to lowercase for case-insensitive matching
+        known_duos_lower = [duo.lower() for duo in known_duos]
+
+        # Step 1: Check for the delimiter " - "
+        delimiter = " - "
+
+        if delimiter not in song_string:
+            # If no delimiter, try to find the title part in double quotes
+            match = re.search(r'"(.*?)"$', song_string)  # Match title in double quotes at the end
+            if not match:
+                return None  # Too complex if no delimiter or double quotes found
+            
+            # Extract title and artist
+            title = match.group(1).strip()  # Title inside double quotes
+            artist = song_string.replace(f'"{title}"', '').strip()  # Everything before the title
+        else:
+            if song_string.count(delimiter) != 1:
+                return None  # Too complex if no or more than 1 delimiter
+            # If delimiter is present, split using " - "
+            artist, title = song_string.split(delimiter)
+            artist = artist.strip()
+            title = title.strip()
+
+        
+        # Step 2: Detect and process information between brackets
+        bracket_pattern = r"\((.*?)\)|\[(.*?)\]|\{(.*?)\}"
+        bracket_matches = re.findall(bracket_pattern, song_string)
+        
+        remix_patterns = ['remix', 'mix', 'rmx', 'edit', 'rework', 'version', 'bootleg', 're-edit', 
+                        'dub', 'extended mix', 'radio edit', 'club mix', 'VIP mix', 'bootleg mix', 
+                        'mashup', 'refix', 'interpretation', 'remake', 'remodel', 'remaster']
+        
+        feature_patterns = ['feat.', 'featured', 'featuring', 'ft.']
+        
+        remove_patterns = ['Original Video', 'Original Mix', 'Original', 'Official Video', 'Videoclip']
+        
+        remix_mapping = {
+            'remix': 'remix', 'rmx': 'remix', 'rework': 'remix', 'refix': 'remix', 
+            'interpretation': 'remix', 'remake': 'remix', 'remodel': 'remix', 
+            're-edit': 'remix', 'mix': 'remix', 'extended mix': 'remix', 'dub': 'dub', 
+            'radio edit': 'dub', 'club mix': 'dub', 'bootleg': 'bootleg', 'bootleg mix': 'bootleg',
+            'version': 'edit', 'remaster': 'remaster', 'edit': 'edit'  # Adding 'version' to the mapping
+        }
+
+        # To hold processed information
+        remix_info = None
+        feature_info = None
+        
+        # Process each substring inside brackets
+        for match in bracket_matches:
+            content = next(filter(None, match))  # Extract content
+            
+            # Case-insensitive matching by converting content to lowercase
+            content_lower = content.lower()
+
+            # Check if it's a remix or feature
+            if any(pattern in content_lower for pattern in remix_patterns):
+                remix_type = next(remix_mapping[pattern] for pattern in remix_patterns if pattern in content_lower)
+                # # Remove the remix indicators from the content to get the remix artist
+                # remix_artist = re.sub(r'(?i)(' + '|'.join(remix_patterns) + ')', '', content, flags=re.IGNORECASE).strip()
+                
+                # # Further clean remix_artist by removing any additional words that are purely remix-related terms
+                # remix_artist = remix_artist.split()  # Split into words
+                # remix_artist = ' '.join([word for word in remix_artist if word.lower() not in remix_patterns]).strip()
+                # Find the exact remix indicator (case-insensitive) to remove from the content
+                for pattern in remix_patterns:
+                    if re.search(pattern, content, re.IGNORECASE):
+                        original_remix_indicator = pattern
+                        break
+
+                # Remove the original remix indicator from the content to get the remix artist
+                if original_remix_indicator:
+                    remix_artist = re.sub(f'(?i){original_remix_indicator}', '', content, flags=re.IGNORECASE).strip()
+                else:
+                    remix_artist = content.strip()    
+
+
+                # If remix_artist is empty after stripping, set to None
+                remix_artist = remix_artist if remix_artist else ''
+                
+                remix_info = (remix_artist, remix_type)
+            
+            elif any(pattern in content_lower for pattern in feature_patterns):
+                feature_artist = re.sub(r'(?i)(' + '|'.join(feature_patterns) + ')', '', content).strip()
+                feature_info = feature_artist
+            
+            # Check if the content matches any remove_patterns
+            elif any(pattern.lower() in content_lower for pattern in remove_patterns):
+                # Remove this content and continue processing
+                song_string = re.sub(re.escape(content), '', song_string)
+                continue  # Skip this bracket content and continue
+
+            else:
+                return None  # Complex substring found
+        
+        # Step 3: Clean the original string by removing the brackets
+        cleaned_song_string = re.sub(bracket_pattern, '', song_string).strip()
+
+        # # Step 4: Split into artist and title
+        # artist, title = cleaned_song_string.split(delimiter)
+        # artist = artist.strip()
+        # title = title.strip()
+        artist = re.sub(bracket_pattern, '', artist).strip()
+        title = re.sub(bracket_pattern, '', title).strip()
+        
+        # Step 5: Process artist part
+        def process_artists(artist_string):
+            # Split on commas first, since artists separated by commas should always be split
+            artist_list = [a.strip() for a in artist_string.split(',')]
+            
+            final_artists = []
+            
+            for artist in artist_list:
+                # Check for '&' and handle artist duos case-insensitively
+                if '&' in artist:
+                    # Normalize artist to lowercase for comparison
+                    normalized_artist = artist.lower()
+                    # If it's a known duo (case-insensitive), keep it together
+                    if normalized_artist in known_duos_lower:
+                        final_artists.append(artist)  # Add the original artist
+                    else:
+                        # Otherwise, split it on '&' and add both artists separately
+                        duo_artists = [a.strip() for a in artist.split('&')]
+                        final_artists.extend(duo_artists)
+                else:
+                    # No '&' present, add as is
+                    final_artists.append(artist)
+            
+            return final_artists
+        
+        # Step 6: Apply the artist processing logic
+        artists = process_artists(artist)
+
+        remix_artist, remix_type = remix_info if remix_info else ('', '')
+
+        return {
+            'artists': artists,  # List of artists
+            'title': title,
+            'remix_type': remix_type,  # (remix_artist, remix_type) or None
+            'remixer': remix_artist,
+            'feat_artist': feature_info if feature_info else ''  # featured_artist or None
+        }
 
     def send_gpt_request(self, args):
         results = list()
@@ -132,5 +337,15 @@ class SongStringParser(BeetsPlugin):
             except Exception as e:
                 self._log.error(f"Error processing song string {song_string}: {e}")
 
-        print(results)
         return results
+
+
+    def concat_artists(self, string_list):
+        if len(string_list) == 0:
+            return ""
+        elif len(string_list) == 1:
+            return string_list[0]
+        elif len(string_list) == 2:
+            return ' & '.join(string_list)
+        else:
+            return ', '.join(string_list[:-1]) + ' & ' + string_list[-1]
