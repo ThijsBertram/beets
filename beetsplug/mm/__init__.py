@@ -59,6 +59,9 @@ class MuziekMachine(BeetsPlugin):
             items += list(lib.items(args.get_items))
             current_stage +=1 
 
+        # STAGE 3: sync platforms
+
+        # STAGE 4: dl_slsk
         if args.dl_slsk:
             pass
 
