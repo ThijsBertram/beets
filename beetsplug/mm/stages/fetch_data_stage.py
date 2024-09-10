@@ -1,15 +1,18 @@
-from beetsplug.customspotify import SpotifyPlugin
-from beetsplug.customyoutube import YouTubePlugin
+from beetsplug.mm.platforms.SpotifyPlugin import spotify_plugin
+from beetsplug.mm.platforms.YoutubePlugin import youtube_plugin
+from beetsplug.mm.platforms.PlatformManager import PlatformManager
 
-class FetchPlatformData:
-    def __call__(self, lib):
-        self.lib = lib
 
-        sf = SpotifyPlugin()
+def FetchPlatformData():
+        
+        pm = PlatformManager()
 
-        spotify_info = sf.retrieve_info(self.lib)
+        
 
-        print(spotify_info)
+        pm.pull_platform()
+        
+
+        
 
         all_info = spotify_info
         

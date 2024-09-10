@@ -106,7 +106,7 @@ class YouTubePlugin(BeetsPlugin):
     def _get_all_playlists(self):
         playlists = []
         request = self.api.playlists().list(
-            part='id,snippet',
+            part='id,snippet,contentDetails',
             mine=True,
             maxResults=50
         )
@@ -158,7 +158,6 @@ class YouTubePlugin(BeetsPlugin):
 
         # populate dict 
         song_data['youtube_id'] = item['youtube_id']
-        # song_data['video_id'] = item['video_id']
         song_data['artists'] = artists
         song_data['main_artist'] = main_artist
 
@@ -185,10 +184,10 @@ class YouTubePlugin(BeetsPlugin):
 
         items = []
         for video in videos:
-            track_info = {'youtube_id': video['id'],
+            track_info = {'id': video['id'],
                     'title': video['snippet']['title'],
                     'description': video['snippet']['description'],
-                    'video_id': video['contentDetails']['videoId']}
+                    'youtube_id': video['contentDetails']['videoId']}
             
             try:
                 track_info['channel'] = video['snippet']['videoOwnerChannelTitle']
