@@ -27,14 +27,15 @@ class Searcher:
         Matches search results to the song.
     """
 
-    def __init__(self, client):
+    def __init__(self, client, log):
         self.search_api = client.searches
+        self._log = log
 
-    def create_queries(self, song):
+    def create_queries(self, item):
         """Creates search queries from the song dictionary."""
-        simple = dict_to_string(song, mode='simple')
-        simpler = dict_to_string(song, mode='simpler')
-        simplest = dict_to_string(song, mode='simplest')
+        simple= ' '.join([item[k] for k in ['main_artist', 'feat_artist', 'song_title', 'remixer', 'remix_type' ] if item[k]])
+        simpler = ' '.join([item[k] for k in ['main_artist', 'song_title',  'remixer'] if item[k]])
+        simplest = ' '.join([item[k] for k in ['main_artist', 'song_title'] if item[k]])
         return deque([simple, simpler, simplest])
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
@@ -53,7 +54,7 @@ class Searcher:
             s = self.search_api.state(search_id)
             return s['isComplete']
         except Exception as e:
-            self._log.error(f"Search state error: {e}")
+            self._log.debug(f"Search state error: {e}")
             return False
 
     def get_search_results(self, search_id):
@@ -105,20 +106,20 @@ class Searcher:
                 try:
                     assert result['isLocked'] == False
                 except AssertionError:
-                    self._log.warning(f"Mismatch - file is locked - {result['filename']}") 
+                    self._log.debug(f"Mismatch - file is locked - {result['filename']}") 
                     continue
                 # KEYS PRESENT   
                 try:
                     assert len(set(result.keys()).intersection(set(['filename', 'length', 'extension', 'bitRate', 'bitDepth']))) >= 4
                 except AssertionError:
-                    self._log.warning(f"Mismatch - keys missing - {result['filename']}")
+                    self._log.debug(f"Mismatch - keys missing - {result['filename']}")
                     continue
                 # BITRATE
                 try:
                     bitrate = result['bitRate'] if 'bitRate' in result.keys() else result['bitDepth'] * 44
                     potential_matches.append((username, result, bitrate))
                 except KeyError:
-                    self._log.warning(f"Mismatch - bitrate missing - {result['filename']}")
+                    self._log.debug(f"Mismatch - bitrate missing - {result['filename']}")
                     continue
 
         # 2. FILTER OUT SONGS THAT MISMATCH ON SONG INFO

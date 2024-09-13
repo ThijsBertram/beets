@@ -17,10 +17,14 @@ class Downloader:
         Moves the downloaded file to the designated location.
     """
 
-    def __init__(self, client):
+    def __init__(self, client, log, timeout):
         self.transfer_api = client.transfers
+        self._log = log
+        self.dl_timeout = timeout
 
     def download(self, match, username):
+
+        timeout = time.perf_counter() + self.dl_timeout
         """Downloads a matched song."""
         try:
             download_attempted_at = datetime.now()
@@ -28,6 +32,9 @@ class Downloader:
             f = match['filename'].split('\\')[-1]
             self._log.info(f"Download started: {f}")        
             while True:
+                if time.perf_counter() > timeout:
+                    self._log.error(f"Download timeout: {f} after {self.dl_timeout} seconds")
+                    return None, download_attempted_at
                 # status = self.transfer_api.state(download_id)
                 file = self.check_download_state(username=username)
                 if not file:

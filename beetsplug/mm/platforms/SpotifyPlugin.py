@@ -87,12 +87,12 @@ class SpotifyPlugin(BeetsPlugin):
         # feat 
         _ = re.search(r'\(feat\. (.*?)\)', title)
         feat_artist, title = (_.group(1).strip(), title[:_.start()] + title[_.end():].strip()) if _ else ('', title)
-        if feat_artist:
-            artists += [feat_artist]
-        # remix 
-        remix_artist = track['name'].split(' - ')[1].replace(' Remix', '') if len(track['name'].split(' - ')) > 1 else ''
-        if remix_artist:
-            artists += [remix_artist]
+        # if feat_artist:
+        #     artists += [feat_artist]
+        # # remix 
+        remixer = track['name'].split(' - ')[1].replace(' Remix', '') if len(track['name'].split(' - ')) > 1 else ''
+        # if remixer:
+        #     artists += [remixer]
         # remove duplicates and substrings
         substrings = {a for a in artists for other in artists if a != other and a in other}
         artists = [a for a in artists if a not in substrings]
@@ -105,8 +105,8 @@ class SpotifyPlugin(BeetsPlugin):
         # populate dict
         song_data['artists'] = artists
         song_data['title'] = title
-        song_data['remixer'] = remix_artist
-        song_data['remix_type'] = 'Remix' if remix_artist else ''
+        song_data['remixer'] = remixer
+        song_data['remix_type'] = 'Remix' if remixer else ''
         song_data['spotify_id'] = spotify_id
         song_data['feat_artist'] = feat_artist
         song_data['main_artist'] = main_artist

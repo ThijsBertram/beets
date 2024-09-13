@@ -145,10 +145,10 @@ class YouTubePlugin(BeetsPlugin):
 
         # ARTISTS
         artists = song_data.pop('artists')
-        if song_data['feat_artist']:
-            artists += [song_data['feat_artist']]
-        if song_data['remixer']:
-            artists += song_data['remixer']
+        # if song_data['feat_artist']:
+        #     artists += [song_data['feat_artist']]
+        # if song_data['remixer']:
+        #     artists += song_data['remixer']
         # remove duplicates and substrings
         substrings = {a for a in artists for other in artists if a != other and a in other}
         artists = [a for a in artists if a not in substrings]

@@ -83,7 +83,9 @@ class PlatformManager(BeetsPlugin):
     def pull_platform(self, lib, opts, args):
 
         self.lib = lib 
-        songs = list()
+        # return
+        existing_items = list()
+        new_items = list()
 
         # GET ARGUMENTS
         platform = opts.platform
@@ -91,24 +93,26 @@ class PlatformManager(BeetsPlugin):
         playlist_type = opts.playlist_type
         db = opts.db
         
-
-
         # PLATFORMS TO PULL FROM
         platforms = ['youtube', 'spotify'] if platform == ('a' or 'all') else [platform]
 
         # GET SONGS
         for platform in platforms:
-            songs += self._retrieve_songs(platform, playlist_name, playlist_type)
-
+            items, song_data = self._retrieve_songs(platform, playlist_name, playlist_type)
+            existing_items += items
         if db:
-            self._insert_songs(lib, songs)
-        
-        return songs
+            added_to_db = self._insert_songs(lib, song_data)
+            new_items += added_to_db
+
+        items = existing_items + new_items
+
+        return items
     
     def _retrieve_songs(self, platform, playlist_name=None, playlist_type=None, skip_existing=True) -> List[Dict]:
         """Handle retrieve command and dispatch to the correct platform plugin."""
         
-        songs = list()
+        existing_items = list()
+        new_song_data = list()
 
         # GET PLUGIN
         p = self._get_plugin_for_platform(platform)
@@ -135,6 +139,7 @@ class PlatformManager(BeetsPlugin):
 
                         if skip_existing and exists:
                             self._log.warning(f"SKIPPING (id already known): {exists}")
+                            existing_items.append(exists)
                             continue
 
                         song_data = plugin._parse_track_item(item)
@@ -161,8 +166,8 @@ class PlatformManager(BeetsPlugin):
                                 song_data['genre'] = ''
                                 song_data['subgenre'] = ''
                         
-                        songs.append(song_data)
-        return songs
+                        new_song_data.append(song_data)
+        return existing_items, new_song_data
         
     def _insert_songs(self, lib, songs) -> List[Item]:
         items = list()
@@ -186,6 +191,7 @@ class PlatformManager(BeetsPlugin):
             self._store_playlist_relation(lib, item.id, playlist['id'])   
 
             self._log.info(f'added SONG: {item.artists}') 
+            items.append(item)
         return items
 
     # HELPER
@@ -222,14 +228,20 @@ class PlatformManager(BeetsPlugin):
 
     def _find_item(self, lib, song):
         title = song['title']
-        remix_artist = song.get('remixer', '')
+        remixer = song.get('remixer', '')
         artists = song.get('artists', '')
+        feat_artist = song.get('feat_artist', '')
 
         t = RegexpQuery('title', re.escape(title))
         a = RegexpQuery('artists', re.escape(artists))
-        r = RegexpQuery('remixer', re.escape(remix_artist))
+        r = RegexpQuery('remixer', re.escape(remixer))
+        f = RegexpQuery('feat_artist', re.escape(feat_artist))
 
-        c = AndQuery([t, a, r]) if remix_artist else AndQuery([t, a])
+        queries = [t, a]
+        queries += [r] if remixer else []
+        queries += [f] if feat_artist else []
+
+        c = AndQuery(queries)
 
         items = lib.items(c)
 

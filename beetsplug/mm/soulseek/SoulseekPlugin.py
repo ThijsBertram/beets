@@ -2,10 +2,12 @@
 from beets.plugins import BeetsPlugin
 from beets.ui import Subcommand
 from beets import config
+from beetsplug.ssp import SongStringParser
 
 
 # Varia'
 import os
+import shutil
 import logging
 import datetime
 
@@ -28,18 +30,20 @@ class SoulSeekPlugin(BeetsPlugin):
 
         super().__init__()
         self._log = logging.getLogger('beets.soulseek')
+        self.ssp = SongStringParser()
 
         # CONFIG
-        self.api_key = config['mm']['SoulseekPlugin']['api_key']
-        self.max_threads = config['mm']['SoulseekPlugin']['max_threads']
-        self.library_dir = config['library']
-        self.slsk_dl_dir = config['mm']['SoulseekPlugin']['slsk_dl_dir']
-        self.host = config['mm']['SoulseekPlugin']['host']
-        
+        self.api_key = str(config['mm']['SoulseekPlugin']['api_key'])
+        self.max_threads = int(str(config['mm']['SoulseekPlugin']['max_threads']))
+        self.library_dir = str(config['directory'])
+        self.slsk_dl_dir = str(config['mm']['SoulseekPlugin']['slsk_dl_dir'])
+        self.host = str(config['mm']['SoulseekPlugin']['host'])
+        self.dl_timeout = int(str(config['mm']['SoulseekPlugin']['dl_timeout']))
+
         # Objects
         self.slsk = SlskdClient(api_key=self.api_key, host=self.host)
-        self.searcher = Searcher(self.slsk)
-        self.downloader = Downloader(self.slsk)
+        self.searcher = Searcher(self.slsk, log=self._log)
+        self.downloader = Downloader(self.slsk, log=self._log, timeout=self.dl_timeout)
         self.download_queue = Queue()
         self.threads = list()
         self.stop_event = threading.Event()
@@ -48,6 +52,10 @@ class SoulSeekPlugin(BeetsPlugin):
         self.dl_slsk = Subcommand('dl-slsk')
         self.dl_slsk.parser.add_option('--n-tries', dest='tries', default='3')
         self.dl_slsk.func = self.dl_slsk
+
+        # Results
+        self.succeeded = list()
+        self.failed = list()
 
     def commands(self):
         return [self.dl_slsk]
@@ -80,18 +88,25 @@ class SoulSeekPlugin(BeetsPlugin):
         """Handles the download tasks from the queue."""
         while not self.stop_event.is_set():
             try:
-                song = self.download_queue.get(timeout=1)  # 1 second timeout
+                item = self.download_queue.get(timeout=1)  # 1 second timeout
             except:
                 continue  # If queue is empty, continue checking
 
-            if song is None:
+            if item is None:
                 break
 
             try:
+                song = {
+                    "main_artist": item['main_artist'],
+                    "song_title": item['title'],
+                    "feat_artist": item['feat_artist'],
+                    "remixer": item['remixer'],
+                    "remix_type": item['remix_type']
+                }
                 # Search song
                 results, search_attempted_at = self.searcher.perform_search(song)
                 search_data = {
-                    'song_id': song['song_id'],
+                    'song_id': item['id'],
                     'search_attempted_at': search_attempted_at,
                     'download_attempted_at': datetime.now()  # Default in case of no matches or results
                 }
@@ -119,13 +134,23 @@ class SoulSeekPlugin(BeetsPlugin):
                             if file_path:
                                 # SOURCE
                                 src = os.path.join(self.slsk_dl_dir, folder, f)
+
+                                artists = item['artists'][0].split(",")
                                 # DESTINATION
-                                dst_filename = dict_to_string(song, mode='filename')
-                                dst = os.path.join(self.library_dir, dst_filename)
+                                fname_artist = self.ssp.concat_artists(artists)
+                                if item['feat_artist']:
+                                    fname_artist += f' feat. {item.feat_artist}'
+                                fname_artist_title = fname_artist + ' - ' + item['title']
+                                if item['remixer']:
+                                    fname_artist_title += f' ({item.remixer} {item.remix_type})'
+
+                                fname = fname_artist_title + f'.{extension}'
+                                dst = os.path.join(self.library_dir, fname)
+                                rmv = os.path.join(self.slsk_dl_dir, folder)
                                 # MOVE
                                 self.downloader.move_file(src, dst)
                                 # DELETE FOLDER
-                                os.remove(os.path.join(self.slsk_dl_dir, folder))
+                                shutil.rmtree(rmv)
 
 
                                 search_data.update({
@@ -135,6 +160,8 @@ class SoulSeekPlugin(BeetsPlugin):
                                     'download_status': 'success',
                                     'download_attempted_at': download_attempted_at
                                 })
+
+                                self.succeeded.append((item, fname))
                                 break
                         else:
                             search_data.update({
@@ -168,24 +195,36 @@ class SoulSeekPlugin(BeetsPlugin):
             finally:
                 self.download_queue.task_done()
 
-        self._log.info("Thread exiting...")
+        self._log.debug("Thread exiting...")
 
 
-    def add_to_queue(self, song):
+    def add_to_queue(self, item):
         """Adds a list of songs to the download queue."""
 
         def queue(song):
-            if isinstance(song, dict):
-                self.download_queue.put(song)
-            elif str(type(song)) == '<Model: SongModel>':
-                song = model_to_dict(song)
-                self.download_queue.put(song)
-            else:
-                self._log.error(f"Error in adding song to queue, wrong type: {type(song)}")
-            return
+            # if isinstance(song, dict):
+            self.download_queue.put(song)
+            # else:
+                # self._log.error(f"Error in adding song to queue, wrong type: {type(song)}")
+            # return
 
-        if isinstance(song, list):
-            for s in song:
-                queue(s)
+        if isinstance(item, list):
+            for i in item:
+                queue(i)
        
+        return
+    
+
+    def clean_slsk(self):
+
+        # slsk - downloads
+        self.slsk.transfers.remove_completed_downloads()
+
+        # slsk - searches
+        searches = self.slsk.searches.get_all()
+        for s in searches:
+            self.slsk.searches.delete(s['id'])
+
+        # slsk - dl directory
+        
         return

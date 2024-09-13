@@ -220,14 +220,14 @@ class PlatformManager(BeetsPlugin):
 
     def _find_item(self, lib, song):
         title = song['title']
-        remix_artist = song.get('remixer', '')
+        remixer = song.get('remixer', '')
         artists = song.get('artists', '')
 
         t = RegexpQuery('title', re.escape(title))
         a = RegexpQuery('artists', re.escape(artists))
-        r = RegexpQuery('remixer', re.escape(remix_artist))
+        r = RegexpQuery('remixer', re.escape(remixer))
 
-        c = AndQuery([t, a, r]) if remix_artist else AndQuery([t, a])
+        c = AndQuery([t, a, r]) if remixer else AndQuery([t, a])
 
         items = lib.items(c)
 

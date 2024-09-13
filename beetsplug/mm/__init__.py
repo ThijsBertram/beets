@@ -1,10 +1,15 @@
 from beets.plugins import BeetsPlugin
 from beetsplug.mm.platforms.PlatformManager import PlatformManager
+from beetsplug.mm.soulseek.SoulseekPlugin import SoulSeekPlugin
+from beetsplug.ssp import SongStringParser
 from .cli.pipe_commands import pull_pf, sync_pf, get_items, dl_slsk, analyze, pipe
 
+import os
 import logging
 from beets.ui import Subcommand
 from collections import namedtuple
+
+
 
 
 
@@ -17,6 +22,7 @@ class MuziekMachine(BeetsPlugin):
 
         # OBJECTS
         self.pm = PlatformManager()
+        self.slsk = SoulSeekPlugin()
 
         # COMMANDS
         self.pull_pf = pull_pf
@@ -55,14 +61,49 @@ class MuziekMachine(BeetsPlugin):
 
         # STAGE 2: pull database
         if args.get_items:
-            self._log.info(f'   > STAGE {current_stage}')
-            items += list(lib.items(args.get_items))
+            self._log.info(f'\t> STAGE {current_stage}')
+
+            if args.get_items == 'all':
+                query_results = list(lib.items())
+                items += query_results
+            elif args.get_items == 'missing_files':
+                query_results = list(lib.items())
+                missing_files = [item for item in query_results if item.get('path') is None]
+                items += missing_files
+            else:
+                query_results = list(lib.items(str(args.get_items)))
+                items += query_results
+
             current_stage +=1 
+    
 
         # STAGE 3: sync platforms
 
         # STAGE 4: dl_slsk
         if args.dl_slsk:
-            pass
 
+            skipped = list()
+
+            # pre download stage: check if file already exists
+            for i in items:
+                # skip items that already have an existing file as a path
+                if i.path:
+                    if os.path.isfile(i.path):
+                        skipped.append(i)
+                        continue
+
+            self.slsk.add_to_queue(items)
+            self.slsk.get_songs()
+            
+            # add new paths to items
+            dl_succeeded = self.slsk.succeeded
+            
+            for item, path in dl_succeeded:
+                item.path = path
+                item.store()
+
+            # clean slsk
+            self.slsk.clean_slsk()
+
+            self._log.info(f"DOWNLOADING FINISHED: {len(dl_succeeded)}/{len(items)} files downloaded - {len(skipped)} files skipped")        
         return
