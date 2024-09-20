@@ -352,10 +352,13 @@ class SongStringParser(BeetsPlugin):
         feat_artist = item['feat_artist']
         remixer = item['remixer']
         remix_type = item['remix_type']
+        main_artist = item['main_artist']
         # get unique collab_artists
-        collab_artists = set(artists) - set([feat_artist]) - set([remixer])   
+        special_artists = set([feat_artist]).union(set([remixer])).union(set([main_artist]))
+        collab_artists = list(set(artists) - special_artists)
+        artists = [main_artist] + collab_artists
         # artist part
-        artist_part = self.concat_artists(collab_artists)
+        artist_part = self.concat_artists(artists)
         if feat_artist:
             artist_part += f' feat. {feat_artist}'
         # title part

@@ -1,3 +1,5 @@
+from collections import namedtuple
+
 class PullPF:
     def __init__(self, lib, platform_manager):
 
@@ -10,8 +12,20 @@ class PullPF:
 
         return
 
+    def construct_arts(self, args):
+        Options = namedtuple('Options', ['platform', 'playlist_type', 'db', 'playlist_name'])
+        opts = Options(platform=args.pull_pf,
+                        playlist_type=args.pl_type,
+                        db=args.db,
+                        playlist_name=args.pl_name
+                        )
+        return
+
     
     def run(self, args):
+        
+
+
 
         return
 

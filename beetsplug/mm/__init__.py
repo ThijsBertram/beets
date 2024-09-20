@@ -47,6 +47,8 @@ class MuziekMachine(BeetsPlugin):
         items = list()
         # STAGE 1: pull platforms
         if args.pull_pf:
+
+
             self._log.info(f'    > STAGE {current_stage}')
             # create opts and args 
             Options = namedtuple('Options', ['platform', 'playlist_type', 'db', 'playlist_name'])
@@ -83,7 +85,6 @@ class MuziekMachine(BeetsPlugin):
         if args.dl_slsk:
 
             skipped = list()
-
             # pre download stage: check if file already exists
             for i in items:
                 # skip items that already have an existing file as a path
@@ -91,7 +92,8 @@ class MuziekMachine(BeetsPlugin):
                     if os.path.isfile(i.path):
                         skipped.append(i)
                         continue
-
+            
+            print('ADDING ITEMS TO DL QUEUE')
             self.slsk.add_to_queue(items)
             self.slsk.get_songs()
             

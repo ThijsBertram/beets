@@ -66,10 +66,19 @@ class Searcher:
             self._log.error(f"Get search results error: {e}")
             return []
 
-    def perform_search(self, song):
+    def perform_search(self, item):
         """Performs the search and returns results."""
+
+        song = {
+            "main_artist": item['main_artist'],
+            "song_title": item['title'],
+            "feat_artist": item['feat_artist'],
+            "remixer": item['remixer'],
+            "remix_type": item['remix_type']
+        }
         try:
             queries = self.create_queries(song)
+            queries = sorted(list(set(queries)))
             search_attempted_at = datetime.now()
             for query in queries:
                 search_id = self.search_soulseek(query)
@@ -78,14 +87,14 @@ class Searcher:
                         time.sleep(1)
                     results = self.get_search_results(search_id)
                     if results:
-                        self._log.info(f"Search query: {query}, Results found: {len(results)}")
+                        # self._log.info(f"Search query: {query}, Results found: {len(results)}")
                         return results, search_attempted_at
-            return None, search_attempted_at
+            return [], search_attempted_at
         except Exception as e:
             self._log.error(f"Error in perform_search: {e}")
             raise
     
-    def match_results(self, search_results, song):
+    def match_results(self, search_results, item):
         """"Matches search results to the song.
         
         Keyword arguments:
@@ -93,6 +102,14 @@ class Searcher:
         Return: return_description
         """
         
+        song = {
+            "main_artist": item['main_artist'],
+            "song_title": item['title'],
+            "feat_artist": item['feat_artist'],
+            "remixer": item['remixer'],
+            "remix_type": item['remix_type']
+        }
+
         # 1. FILTER POTENTIAL MATCHES (and store as list of dicts)
         #   > remove locked files
         #   > remove files missing information

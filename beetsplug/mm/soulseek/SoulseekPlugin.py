@@ -7,12 +7,15 @@ from beetsplug.ssp import SongStringParser
 
 # Varia'
 import os
+import glob
 import shutil
 import logging
 import datetime
 
+
+import pathlib
 import threading
-from queue import Queue
+from queue import Queue, Empty
 from datetime import datetime
 
 from slskd_api import SlskdClient
@@ -54,15 +57,13 @@ class SoulSeekPlugin(BeetsPlugin):
         self.dl_slsk.func = self.dl_slsk
 
         # Results
-        self.succeeded = list()
-        self.failed = list()
+        self.dls = dict()
 
     def commands(self):
         return [self.dl_slsk]
     
     def dl_slsk(self, lib, opts, args):
         return
-    
 
     def get_songs(self):
         """Wrapper to start threads and ensure they stop when the queue is empty."""
@@ -73,130 +74,140 @@ class SoulSeekPlugin(BeetsPlugin):
             t.daemon = True
             t.start()
             self.threads.append(t)
-        # Wait for all tasks to be completed
-        self.download_queue.join()          
-        # Stops the download threads
-        self.stop_event.set()               
-        for _ in range(len(self.threads)):
-            self.download_queue.put(None)
-        for t in self.threads:
-            t.join()
+
+        # # Wait for all tasks to be completed
+        # self.download_queue.join()
+        # print("JOINED")          
+        # # Stops the download threads
+        # self.stop_event.set()               
+        # for _ in range(len(self.threads)):
+        #     self.download_queue.put(None)
+        # for t in self.threads:
+        #     t.join()
+        """Wrapper to start threads and ensure they stop when the queue is empty."""
+
+        # Wait for the queue to be processed
+        self.download_queue.join()
+
+        # Send a stop signal to the threads
+        for _ in range(self.max_threads):
+            self.download_queue.put(None)  # This will signal threads to stop
+
+        self._log.info("All downloads completed and threads exited.")
         self.threads.clear()
 
 
     def handle_download(self):
         """Handles the download tasks from the queue."""
+
         while not self.stop_event.is_set():
+            # print()
+            # print()
+            # print("NEW THREAD")
+            # print("=========================================================")
             try:
                 item = self.download_queue.get(timeout=1)  # 1 second timeout
-            except:
-                continue  # If queue is empty, continue checking
+                print(f'THREAD - {item.id} - STARTED')
+                if item is None:
+                    print("QUEUE EMPTY")
+                    break
 
-            if item is None:
-                break
+                # print(item)
 
-            try:
-                song = {
-                    "main_artist": item['main_artist'],
-                    "song_title": item['title'],
-                    "feat_artist": item['feat_artist'],
-                    "remixer": item['remixer'],
-                    "remix_type": item['remix_type']
-                }
-                # Search song
-                results, search_attempted_at = self.searcher.perform_search(song)
-                search_data = {
-                    'song_id': item['id'],
-                    'search_attempted_at': search_attempted_at,
-                    'download_attempted_at': datetime.now()  # Default in case of no matches or results
-                }
-                # Match search results
-                if results:
-                    matches = self.searcher.match_results(results, song)
-                    search_data.update({
-                        'results_found': str(len(results)),
-                        'matches_found': str(len(matches))
-                    })
-                    # Download match
-                    if matches:
-                        for match in matches:
-                            username, match_data = match
-                            file, download_attempted_at = self.downloader.download(match=match_data,
-                                                                                  username=username)
+                self.dls[item.id] = dict()
+                self.dls[item.id]['item'] = item
+                
+                # SEARCH
+                results, search_attempted_at = self.searcher.perform_search(item)
 
-                            file_path = file['filename']
-                            folder = file_path.split('\\')[-2]
-                            f = file_path.split('\\')[-1]
-                            extension = f.split('.')[-1]
-                            song['extension'] = extension
+                # print('~~download_queue')
+                # print(self.download_queue.unfinished_tasks)
+                # print(len(self.download_queue.queue))
 
-                            # MOVE THE FILE
-                            if file_path:
-                                # SOURCE
-                                src = os.path.join(self.slsk_dl_dir, folder, f)
+                if not results:
+                    self.dls[item.id]['status'] = 'no_results'
+                    break
+                
+                # print('hoi')
+                # MATCH
+                matches = self.searcher.match_results(results, item)
 
-                                artists = item['artists'][0].split(",")
-                                # DESTINATION
-                                fname_artist = self.ssp.concat_artists(artists)
-                                if item['feat_artist']:
-                                    fname_artist += f' feat. {item.feat_artist}'
-                                fname_artist_title = fname_artist + ' - ' + item['title']
-                                if item['remixer']:
-                                    fname_artist_title += f' ({item.remixer} {item.remix_type})'
+                # RESULTS DICT
+                n_results = len(results)
+                n_matches = len(matches)
+                self.dls[item.id]['n_results'] = n_results
+                self.dls[item.id]['n_mathces'] = n_matches
 
-                                fname = fname_artist_title + f'.{extension}'
-                                dst = os.path.join(self.library_dir, fname)
-                                rmv = os.path.join(self.slsk_dl_dir, folder)
-                                # MOVE
-                                self.downloader.move_file(src, dst)
-                                # DELETE FOLDER
-                                shutil.rmtree(rmv)
+                if not matches:
+                    # print("NO MATCHES")
+                    self.dls[item.id]['status'] = 'no_matches'
+                    break
 
+                # Download match
+                for match in matches:            
+                    username, match_data = match
+                    
+                    file, download_attempted_at = self.downloader.download(match=match_data,
+                                                                            username=username)
+                    if not file:
+                        self.dls[item.id]['status'] = 'dl_timeout'
+                        break
 
-                                search_data.update({
-                                    'search_query': match[1]['filename'],
-                                    'file': os.path.basename(file_path),
-                                    'folder': folder,
-                                    'download_status': 'success',
-                                    'download_attempted_at': download_attempted_at
-                                })
+                    fpath = file['filename']
+                    fname = fpath.split('\\')[-1]
 
-                                self.succeeded.append((item, fname))
-                                break
-                        else:
-                            search_data.update({
-                                'search_query': 'N/A',
-                                'file': 'N/A',
-                                'folder': 'N/A',
-                                'download_status': 'no matches'
-                            })
-                    else:
-                        search_data.update({
-                            'search_query': 'N/A',
-                            'file': 'N/A',
-                            'folder': 'N/A',
-                            'download_status': 'no matches'
-                        })
-                else:
-                    search_data.update({
-                        'results_found': '0',
-                        'matches_found': '0',
-                        'search_query': 'N/A',
-                        'file': 'N/A',
-                        'folder': 'N/A',
-                        'download_status': 'no results'
-                    })
+                    # print("PATHS")
+                    # print(fpath)
+                    # print(fname)
 
-                # TO DO DATABASE STUFFS
-                # SoulseekModel.create(**search_data)
+                    dl_fstring = glob.glob(f'{self.slsk_dl_dir}/**/*{fname}')
+                    # print("MATCHED DOWNLOADED FILENAMES HERE")
+                    # print(dl_fstring)
+                    try:
+                        dl_fstring = dl_fstring[0]
+                    except IndexError:
+                        # print("~~~~~~~~~~~~ BIG ERROR: ~~~~~~~~~~~~~~")
+                        break
+                    dl_abspath = pathlib.Path(dl_fstring).resolve()
+                    extension = fname.split('.')[-1]
+
+                    # MOVE FILE
+                    if dl_abspath:
+                        # CONSTRUCT PATHS
+                        src = dl_abspath
+                        # print("MAKING STRING FROM ITEM")
+                        dst = self.ssp.string_from_item(item, ext=extension, path=self.library_dir)
+                        # print("MADE STRING:")
+                        # print(dst)  
+                        rmv = dl_abspath.parent.absolute()
+                        # print(f"SRC PATH IS: {src}")
+                        # print("SRC IS FILE : ", os.path.isfile(src))
+                        # MOVE
+                        self.downloader.move_file(src, dst)
+                        # DELETE FOLDER
+                        # print(f"REMOVE FOLDER: {rmv}")
+                        # print(f"FOLDER IS DIR: {os.path.isdir(rmv)}")
+                        shutil.rmtree(rmv)
+
+                        self.dls[item.id]['status'] = 'success'
+                        break                
+            
+            except Empty:
+                print("QUEUE EMPTY")
+                break  # If queue is empty, continue checking
 
             except Exception as e:
-                self._log.error(f"Error in handle_downloads: {e}")
+                self._log.error(f'Error in handle_downlaods: {e}\nFor item {item}')
+                break
+            
             finally:
                 self.download_queue.task_done()
+                self._log.debug(f'TRHEAD - {item.id} - RESOLVED')
 
-        self._log.debug("Thread exiting...")
-
+        # print("GEBROKEN")
+        # self._log.debug(F"THREAD - {item.id} - RESOLVED")
+        # self.download_queue.task_done()
+        return
 
     def add_to_queue(self, item):
         """Adds a list of songs to the download queue."""
@@ -209,6 +220,7 @@ class SoulSeekPlugin(BeetsPlugin):
             # return
 
         if isinstance(item, list):
+            print(f'ALL THREADS - {[i.id for i in item]} - {len([item])} TOTAL')
             for i in item:
                 queue(i)
        
@@ -226,5 +238,4 @@ class SoulSeekPlugin(BeetsPlugin):
             self.slsk.searches.delete(s['id'])
 
         # slsk - dl directory
-        
         return

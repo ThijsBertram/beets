@@ -36,33 +36,45 @@ class Downloader:
                     self._log.error(f"Download timeout: {f} after {self.dl_timeout} seconds")
                     return None, download_attempted_at
                 # status = self.transfer_api.state(download_id)
-                file = self.check_download_state(username=username)
+                file = self.check_download_state(username=username, f=f)
                 if not file:
+                    time.sleep(1)
                     continue
                 elif file['state'] == 'Completed, Succeeded':
                     self._log.info(f"Download complete: {f}")
                     return file, download_attempted_at
+                elif file['state'] == 'Queued, Remotely':
+                    self._log.info(f"Download queued remotely: {f}")
+                    return None, download_attempted_at
                 else: 
                     self._log.error(f"Download failed: {f}")
                     return None, download_attempted_at
-                time.sleep(1)
         except Exception as e:
             self._log.error(f"Download error: {e}")
             raise
 
 
-    def check_download_state(self, username):
+    def check_download_state(self, username, f):
         # download = self.transfer_api.get(download(self.dl_username, self.dl_file))
         downloads = self.transfer_api.get_all_downloads()
         dl_from_username = [download for download in downloads if download['username'] == username]
 
+
         for dl in dl_from_username:
+
             file = dl['directories'][0]['files'][0]
             completed = 1 if file['state'] == 'Completed, Succeeded' else 0
-            fname = file['filename']
+            fname = file['filename'].split('\\')[-1]
             username = file['username']
+            # print("DOWNLOAD STAUTS")
+            # print(file['state'])
+            # print(fname)
+            # print(f)
+            # print(fname == f)
+            # print()
 
-            if completed:
+            if completed and (fname == f):
+                print(f'\t DL COMPLETE: {fname}')
                 return file
             else:
                 return None
@@ -72,10 +84,11 @@ class Downloader:
         """Moves the downloaded file to the designated location."""
         try:
             if os.path.exists(dest):
-                self._log.info(f"Destination file {dest} already exists. Deleting the source file {src}.")
+                # self._log.info(f"Destination file {dest} already exists. Deleting the source file {src}.")
                 os.remove(src)
             else:
                 os.rename(src, dest)
-                self._log.info(f"Moved file from {src} to {dest}")
+                # self._log.info(f"Moved file from {src} to {dest}")
         except Exception as e:
-            self._log.error(f"Error moving file: {e}")
+            # self._log.error(f"Error moving file: {e}")
+            pass
