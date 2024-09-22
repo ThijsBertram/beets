@@ -74,21 +74,8 @@ class Downloader:
             # print()
 
             if completed and (fname == f):
-                print(f'\t DL COMPLETE: {fname}')
                 return file
             else:
                 return None
         return
 
-    def move_file(self, src, dest):
-        """Moves the downloaded file to the designated location."""
-        try:
-            if os.path.exists(dest):
-                # self._log.info(f"Destination file {dest} already exists. Deleting the source file {src}.")
-                os.remove(src)
-            else:
-                os.rename(src, dest)
-                # self._log.info(f"Moved file from {src} to {dest}")
-        except Exception as e:
-            # self._log.error(f"Error moving file: {e}")
-            pass

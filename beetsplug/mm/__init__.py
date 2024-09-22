@@ -42,7 +42,7 @@ class MuziekMachine(BeetsPlugin):
         n_stages= 0
         current_stage = 0
         # logging
-        self._log.info('PIPELINE STARTED WITH {} STAGES')
+        # self._log.info('PIPELINE STARTED WITH {} STAGES')
 
         items = list()
         # STAGE 1: pull platforms
@@ -71,7 +71,13 @@ class MuziekMachine(BeetsPlugin):
             elif args.get_items == 'missing_files':
                 query_results = list(lib.items())
                 missing_files = [item for item in query_results if item.get('path') is None]
+                
+
+                # TEMP
+                missing_files = [item for item in missing_files if item.get('genre') == 'Club']
+
                 items += missing_files
+
             else:
                 query_results = list(lib.items(str(args.get_items)))
                 items += query_results
@@ -97,15 +103,29 @@ class MuziekMachine(BeetsPlugin):
             self.slsk.add_to_queue(items)
             self.slsk.get_songs()
             
-            # add new paths to items
-            dl_succeeded = self.slsk.succeeded
-            
-            for item, path in dl_succeeded:
+            # ADD SUCCESFUL DLS TO LIBRARY
+            success = [i for i in self.slsk.dls.values() if i['status'] == 'success']
+            no_results = [i for i in self.slsk.dls.values() if i['status'] == 'no_results']
+            no_matches = [i for i in self.slsk.dls.values() if i['status'] == 'no_matches']
+            dl_failed = [i for i in self.slsk.dls.values() if i['status'] == 'dl_failed']
+            move_failed = [i for i in self.slsk.dls.values() if i['status'] == 'move_failed']
+            not_finished = [i for i in self.slsk.dls.values() if i['status'] == 'not_finished']
+
+            self._log.info("~~~ DOWNLOAD RESULTS ~~~")
+            self._log.info(f"{len(success)} - SUCCESS")
+            self._log.info(f"{len(no_results)} - NO RESULTS")
+            self._log.info(f"{len(no_matches)} - NO MATCHES")
+            self._log.info(f"{len(dl_failed)} - DOWNLOAD FAILED")
+            self._log.info(f"{len(move_failed)} - MOVING FAILED")
+            self._log.info(f"{len(not_finished)} - NOT FINISHED")
+            self._log.info(f" {len(success)} / {len(self.slsk.dls.values())} SUCCESSFUL")
+            self._log.info('~~~~~~~~~~~~~~~~~~~~~~~~')
+
+            for i in success:
+                item = i['item']
+                path = i['path']
+
                 item.path = path
                 item.store()
-
-            # clean slsk
-            self.slsk.clean_slsk()
-
-            self._log.info(f"DOWNLOADING FINISHED: {len(dl_succeeded)}/{len(items)} files downloaded - {len(skipped)} files skipped")        
+    
         return

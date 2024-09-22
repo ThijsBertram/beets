@@ -1,5 +1,6 @@
 # Beets
 from beets.plugins import BeetsPlugin
+from beets.library import Library
 from beets.ui import Subcommand
 from beets import config
 from beetsplug.ssp import SongStringParser
@@ -8,6 +9,7 @@ from beetsplug.ssp import SongStringParser
 # Varia'
 import os
 import glob
+import time
 import shutil
 import logging
 import datetime
@@ -44,6 +46,7 @@ class SoulSeekPlugin(BeetsPlugin):
         self.dl_timeout = int(str(config['mm']['SoulseekPlugin']['dl_timeout']))
 
         # Objects
+        self.lib = 
         self.slsk = SlskdClient(api_key=self.api_key, host=self.host)
         self.searcher = Searcher(self.slsk, log=self._log)
         self.downloader = Downloader(self.slsk, log=self._log, timeout=self.dl_timeout)
@@ -62,11 +65,11 @@ class SoulSeekPlugin(BeetsPlugin):
     def commands(self):
         return [self.dl_slsk]
     
-    def dl_slsk(self, lib, opts, args):
-        return
-
     def get_songs(self):
         """Wrapper to start threads and ensure they stop when the queue is empty."""
+        
+        self.clean_slsk()
+
         # start threads
         self.stop_event.clear()
         for _ in range(self.max_threads):
@@ -75,154 +78,176 @@ class SoulSeekPlugin(BeetsPlugin):
             t.start()
             self.threads.append(t)
 
-        # # Wait for all tasks to be completed
-        # self.download_queue.join()
-        # print("JOINED")          
-        # # Stops the download threads
-        # self.stop_event.set()               
-        # for _ in range(len(self.threads)):
-        #     self.download_queue.put(None)
-        # for t in self.threads:
-        #     t.join()
-        """Wrapper to start threads and ensure they stop when the queue is empty."""
-
-        # Wait for the queue to be processed
+        # Wait for all tasks to be completed
         self.download_queue.join()
+        # Stops the download threads
+        self.stop_event.set()         
 
-        # Send a stop signal to the threads
-        for _ in range(self.max_threads):
-            self.download_queue.put(None)  # This will signal threads to stop
+        for _ in range(len(self.threads)):
+            self.download_queue.put(None)
+        for t in self.threads:
+            t.join()
 
-        self._log.info("All downloads completed and threads exited.")
         self.threads.clear()
 
+        """Wrapper to start threads and ensure they stop when the queue is empty."""
 
+        self._log.info("~~ DOWNLOADING COMPLETE ~~")
+        return
+            
+    def get_item(self):
+        item = self.download_queue.get(timeout=1)
+        item_id = item.id
+        self.dls[item.id] = dict()
+        self.dls[item.id]['item'] = item
+        self.dls[item.id]['status'] = 'started'
+        print(f'THREAD - {item.id} - STARTED')
+        return item, item_id
+    
+    def get_results(self, item, item_id):
+        results, search_attempted_at = self.searcher.perform_search(item)
+        if not results:
+            self.dls[item_id]['status'] = 'no_results'
+            # self.download_queue.task_done()
+            return False
+        else:
+            self.dls[item_id]['status'] = 'results'
+            n_results = len(results)
+            self.dls[item.id]['n_results'] = n_results
+            return results
+        
+    def get_matches(self, results, item):
+        matches = self.searcher.match_results(results, item)
+        if not matches:
+            self.dls[item.id]['status'] = 'no_matches'
+            # self.download_queue.task_done()
+            return False
+        n_matches = len(matches)
+        self.dls[item.id]['n_mathces'] = n_matches
+
+        return matches
+    
+    def get_download(self, match, item):
+        # match data
+        username, match_data = match
+        # download file
+        file, download_attempted_at = self.downloader.download(match=match_data,
+                                                                username=username)
+        # check 
+        if not file:
+            self.dls[item.id]['status'] = 'dl_failed'
+            return False
+        return file
+
+    def move_dl(self, file, item):
+        try:
+            print(f"STARTING MOVE FOR ITEM - {item.id}")
+            # 5. MOVE FILE
+            # 5.0 process filename stuff - prepare moving 
+            fpath = file['filename']
+            fname = fpath.split('\\')[-1]
+            dl_fstring = glob.glob(f'{self.slsk_dl_dir}/**/*{fname}')  
+
+            # ugly piece of code - fix this 
+            try:
+                dl_fstring = dl_fstring[0]
+            except IndexError:
+                return False
+            dl_abspath = pathlib.Path(dl_fstring).resolve()
+            extension = fname.split('.')[-1]
+            # 5.5 move file
+            # MOVE FILE
+            if dl_abspath:
+                # CONSTRUCT PATHS
+                src = dl_abspath
+                dst = self.ssp.string_from_item(item, ext=extension, path=self.library_dir)
+                rmv = dl_abspath.parent.absolute()
+
+
+                if os.path.exists(dst):
+                    # self._log.info(f"Destination file {dest} already exists. Deleting the source file {src}.")
+                    os.remove(src)
+                else:
+                    os.rename(src, dst)
+                                
+                # delete placeholder dir
+                shutil.rmtree(rmv)
+
+                self.dls[item.id]['path'] = dst
+                self.dls[item.id]['status'] = 'success'
+                return True
+        except:
+            self.dls[item.id]['status'] = 'move_failed'
+            return False
+        
     def handle_download(self):
         """Handles the download tasks from the queue."""
-
+        # MAIN LOOP
         while not self.stop_event.is_set():
-            # print()
-            # print()
-            # print("NEW THREAD")
-            # print("=========================================================")
+            results = None
+            n_results = None
+            matches = None
+            n_matches = None
+            item_id = None
+            
             try:
-                item = self.download_queue.get(timeout=1)  # 1 second timeout
-                print(f'THREAD - {item.id} - STARTED')
-                if item is None:
-                    print("QUEUE EMPTY")
-                    break
-
-                # print(item)
-
-                self.dls[item.id] = dict()
-                self.dls[item.id]['item'] = item
-                
-                # SEARCH
-                results, search_attempted_at = self.searcher.perform_search(item)
-
-                # print('~~download_queue')
-                # print(self.download_queue.unfinished_tasks)
-                # print(len(self.download_queue.queue))
-
+                # 1. ITEM - taken from queue
+                item, item_id = self.get_item()
+                # 2. RESULTS for slsk item search
+                results = self.get_results(item, item_id)
                 if not results:
-                    self.dls[item.id]['status'] = 'no_results'
-                    break
-                
-                # print('hoi')
-                # MATCH
-                matches = self.searcher.match_results(results, item)
-
-                # RESULTS DICT
-                n_results = len(results)
-                n_matches = len(matches)
-                self.dls[item.id]['n_results'] = n_results
-                self.dls[item.id]['n_mathces'] = n_matches
-
+                    continue
+                # 3. MATCH - results agains the item
+                matches = self.get_matches(results, item)
                 if not matches:
-                    # print("NO MATCHES")
-                    self.dls[item.id]['status'] = 'no_matches'
-                    break
-
-                # Download match
-                for match in matches:            
-                    username, match_data = match
-                    
-                    file, download_attempted_at = self.downloader.download(match=match_data,
-                                                                            username=username)
+                    continue
+                # 4. DOWNLOAD - best matches
+                for match in matches[:3]:                   # [:3] REPLACE WITH CONFIG VALUE
+                    file = self.get_download(match, item)
                     if not file:
-                        self.dls[item.id]['status'] = 'dl_timeout'
-                        break
+                        continue
 
-                    fpath = file['filename']
-                    fname = fpath.split('\\')[-1]
-
-                    # print("PATHS")
-                    # print(fpath)
-                    # print(fname)
-
-                    dl_fstring = glob.glob(f'{self.slsk_dl_dir}/**/*{fname}')
-                    # print("MATCHED DOWNLOADED FILENAMES HERE")
-                    # print(dl_fstring)
-                    try:
-                        dl_fstring = dl_fstring[0]
-                    except IndexError:
-                        # print("~~~~~~~~~~~~ BIG ERROR: ~~~~~~~~~~~~~~")
-                        break
-                    dl_abspath = pathlib.Path(dl_fstring).resolve()
-                    extension = fname.split('.')[-1]
-
-                    # MOVE FILE
-                    if dl_abspath:
-                        # CONSTRUCT PATHS
-                        src = dl_abspath
-                        # print("MAKING STRING FROM ITEM")
-                        dst = self.ssp.string_from_item(item, ext=extension, path=self.library_dir)
-                        # print("MADE STRING:")
-                        # print(dst)  
-                        rmv = dl_abspath.parent.absolute()
-                        # print(f"SRC PATH IS: {src}")
-                        # print("SRC IS FILE : ", os.path.isfile(src))
-                        # MOVE
-                        self.downloader.move_file(src, dst)
-                        # DELETE FOLDER
-                        # print(f"REMOVE FOLDER: {rmv}")
-                        # print(f"FOLDER IS DIR: {os.path.isdir(rmv)}")
-                        shutil.rmtree(rmv)
-
-                        self.dls[item.id]['status'] = 'success'
-                        break                
-            
-            except Empty:
-                print("QUEUE EMPTY")
-                break  # If queue is empty, continue checking
-
+                # 5. MOVE - downloaded files
+                    moved = self.move_dl(file, item)
+                    if not moved:
+                        continue          
+     
+                # 6. ADD PATH - downloaded files
+ 
             except Exception as e:
-                self._log.error(f'Error in handle_downlaods: {e}\nFor item {item}')
-                break
-            
+                self._log.error(f"THREAD - {item_id} - {item.title} - ERROR - {e}")
+                continue
+            # used for joining queue ( can be prettier )
+            except AttributeError:
+                pass
             finally:
+                status = self.dls[item.id]['status']
+                if status == 'no_results':
+                    self._log.info(f'TRHEAD - {item_id} - {item.title} - X RESOLVED X - no results')
+                elif status == 'no_matches':
+                    self._log.info(f'TRHEAD - {item_id} - {item.title} - X RESOLVED X - no matches')
+                elif status == 'download_failed':
+                    self._log.info(f'TRHEAD - {item_id} - {item.title} - X RESOLVED X - dl failed')
+                elif status == 'started':
+                    self._log.info(f'THREAD - {item.id} - {item.title} - X RESOLVED X - not finished')
+                else:
+                    self._log.info(f'TRHEAD - {item_id} - {item.title} - ! RESOLVED ! - download complete')
                 self.download_queue.task_done()
-                self._log.debug(f'TRHEAD - {item.id} - RESOLVED')
 
-        # print("GEBROKEN")
-        # self._log.debug(F"THREAD - {item.id} - RESOLVED")
-        # self.download_queue.task_done()
+
         return
 
     def add_to_queue(self, item):
         """Adds a list of songs to the download queue."""
 
         def queue(song):
-            # if isinstance(song, dict):
             self.download_queue.put(song)
-            # else:
-                # self._log.error(f"Error in adding song to queue, wrong type: {type(song)}")
-            # return
 
         if isinstance(item, list):
             print(f'ALL THREADS - {[i.id for i in item]} - {len([item])} TOTAL')
             for i in item:
                 queue(i)
+                time.sleep(0.1)
        
         return
     
