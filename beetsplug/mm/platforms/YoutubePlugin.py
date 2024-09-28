@@ -82,7 +82,6 @@ class YouTubePlugin(BeetsPlugin):
             # sand store them in json
             with open(auth_path + '/yt_credentials.json', 'w') as token:
                 token.write(json.dumps(cred_file))
-                print()
         
         self.credentials = credentials
         return 

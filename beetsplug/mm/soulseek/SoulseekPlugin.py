@@ -46,7 +46,6 @@ class SoulSeekPlugin(BeetsPlugin):
         self.dl_timeout = int(str(config['mm']['SoulseekPlugin']['dl_timeout']))
 
         # Objects
-        self.lib = 
         self.slsk = SlskdClient(api_key=self.api_key, host=self.host)
         self.searcher = Searcher(self.slsk, log=self._log)
         self.downloader = Downloader(self.slsk, log=self._log, timeout=self.dl_timeout)
@@ -92,7 +91,6 @@ class SoulSeekPlugin(BeetsPlugin):
 
         """Wrapper to start threads and ensure they stop when the queue is empty."""
 
-        self._log.info("~~ DOWNLOADING COMPLETE ~~")
         return
             
     def get_item(self):
@@ -101,7 +99,7 @@ class SoulSeekPlugin(BeetsPlugin):
         self.dls[item.id] = dict()
         self.dls[item.id]['item'] = item
         self.dls[item.id]['status'] = 'started'
-        print(f'THREAD - {item.id} - STARTED')
+        self._log.info(f'\t\t THREAD - {item.id} - STARTED')
         return item, item_id
     
     def get_results(self, item, item_id):
@@ -141,7 +139,6 @@ class SoulSeekPlugin(BeetsPlugin):
 
     def move_dl(self, file, item):
         try:
-            print(f"STARTING MOVE FOR ITEM - {item.id}")
             # 5. MOVE FILE
             # 5.0 process filename stuff - prepare moving 
             fpath = file['filename']
@@ -175,7 +172,7 @@ class SoulSeekPlugin(BeetsPlugin):
 
                 self.dls[item.id]['path'] = dst
                 self.dls[item.id]['status'] = 'success'
-                return True
+                return dst
         except:
             self.dls[item.id]['status'] = 'move_failed'
             return False
@@ -188,11 +185,16 @@ class SoulSeekPlugin(BeetsPlugin):
             n_results = None
             matches = None
             n_matches = None
+            item = None
             item_id = None
+            title = None
+            file = None
             
             try:
                 # 1. ITEM - taken from queue
                 item, item_id = self.get_item()
+                if not item:
+                    continue
                 # 2. RESULTS for slsk item search
                 results = self.get_results(item, item_id)
                 if not results:
@@ -202,36 +204,44 @@ class SoulSeekPlugin(BeetsPlugin):
                 if not matches:
                     continue
                 # 4. DOWNLOAD - best matches
-                for match in matches[:3]:                   # [:3] REPLACE WITH CONFIG VALUE
+                for match in matches[:1]:                   # [:3] REPLACE WITH CONFIG VALUE
                     file = self.get_download(match, item)
                     if not file:
                         continue
 
                 # 5. MOVE - downloaded files
-                    moved = self.move_dl(file, item)
-                    if not moved:
+                    path = self.move_dl(file, item)
+                    if not path:
                         continue          
      
                 # 6. ADD PATH - downloaded files
- 
+                    item.path = path
+                    item.store()
+
+                # -
             except Exception as e:
-                self._log.error(f"THREAD - {item_id} - {item.title} - ERROR - {e}")
+                if item:
+                    self._log.error(f"\t\t THREAD - {item_id} - {title} - ERROR - {e}")
                 continue
             # used for joining queue ( can be prettier )
             except AttributeError:
                 pass
             finally:
-                status = self.dls[item.id]['status']
+                # UGLY UGLY UGLY
+                if not item:
+                    continue
+
+                status = self.dls[item.id]['status']        
                 if status == 'no_results':
-                    self._log.info(f'TRHEAD - {item_id} - {item.title} - X RESOLVED X - no results')
+                    self._log.info(f'\t\t TRHEAD - {item_id} - {title} - X RESOLVED X - no results')
                 elif status == 'no_matches':
-                    self._log.info(f'TRHEAD - {item_id} - {item.title} - X RESOLVED X - no matches')
+                    self._log.info(f'\t\t TRHEAD - {item_id} - {title} - X RESOLVED X - no matches')
                 elif status == 'download_failed':
-                    self._log.info(f'TRHEAD - {item_id} - {item.title} - X RESOLVED X - dl failed')
+                    self._log.info(f'\t\t TRHEAD - {item_id} - {title} - X RESOLVED X - dl failed')
                 elif status == 'started':
-                    self._log.info(f'THREAD - {item.id} - {item.title} - X RESOLVED X - not finished')
+                    self._log.info(f'\t\t THREAD - {item_id} - {title} - X RESOLVED X - not finished')
                 else:
-                    self._log.info(f'TRHEAD - {item_id} - {item.title} - ! RESOLVED ! - download complete')
+                    self._log.info(f'\t\t TRHEAD - {item_id} - {title} - ! RESOLVED ! - download complete')
                 self.download_queue.task_done()
 
 
@@ -244,7 +254,7 @@ class SoulSeekPlugin(BeetsPlugin):
             self.download_queue.put(song)
 
         if isinstance(item, list):
-            print(f'ALL THREADS - {[i.id for i in item]} - {len([item])} TOTAL')
+            self._log.debug(f'ALL THREADS - {[i.id for i in item]} - {len([item])} TOTAL')
             for i in item:
                 queue(i)
                 time.sleep(0.1)

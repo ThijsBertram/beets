@@ -118,7 +118,14 @@ class Searcher:
         for i, user_files in enumerate(search_results):
             username = user_files['username']
             for result in user_files['files']:
+                
                 file = dict()
+                
+                
+                # FILTER m4a - FIX THIS MAKE IT GENERAL NOT HARDCODED UGLY UGLY UGLY CODE
+                if 'm4a' in result['extension'].lower():
+                    continue
+
                 # LOCKED FILE
                 try:
                     assert result['isLocked'] == False
@@ -138,6 +145,9 @@ class Searcher:
                 except KeyError:
                     self._log.debug(f"Mismatch - bitrate missing - {result['filename']}")
                     continue
+
+
+                
 
         # 2. FILTER OUT SONGS THAT MISMATCH ON SONG INFO
         # main artist & title

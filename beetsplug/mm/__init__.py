@@ -47,9 +47,9 @@ class MuziekMachine(BeetsPlugin):
         items = list()
         # STAGE 1: pull platforms
         if args.pull_pf:
+            
+            self._log.info(f' ~~~ STAGE {current_stage}: PULL PLATFORM ~~~~ STARTED ~~~')
 
-
-            self._log.info(f'    > STAGE {current_stage}')
             # create opts and args 
             Options = namedtuple('Options', ['platform', 'playlist_type', 'db', 'playlist_name'])
             opts = Options(platform=args.pull_pf,
@@ -59,11 +59,17 @@ class MuziekMachine(BeetsPlugin):
                            )
             
             items += self.pm.pull_platform(lib, opts, [])
+            
             current_stage += 1
+
+
+        
 
         # STAGE 2: pull database
         if args.get_items:
-            self._log.info(f'\t> STAGE {current_stage}')
+
+            self._log.info(f' ~~~ STAGE {current_stage}: PULL DATABASE ~~~~ STARTED ~~~')
+
 
             if args.get_items == 'all':
                 query_results = list(lib.items())
@@ -82,6 +88,7 @@ class MuziekMachine(BeetsPlugin):
                 query_results = list(lib.items(str(args.get_items)))
                 items += query_results
 
+
             current_stage +=1 
     
 
@@ -89,6 +96,9 @@ class MuziekMachine(BeetsPlugin):
 
         # STAGE 4: dl_slsk
         if args.dl_slsk:
+
+            self._log.info(f' ~~~ STAGE {current_stage}: DL SOULSEEK ~~~~ STARTED ~~~')
+       
 
             skipped = list()
             # pre download stage: check if file already exists
@@ -99,7 +109,7 @@ class MuziekMachine(BeetsPlugin):
                         skipped.append(i)
                         continue
             
-            print('ADDING ITEMS TO DL QUEUE')
+            print('\t ADDING ITEMS TO DL QUEUE')
             self.slsk.add_to_queue(items)
             self.slsk.get_songs()
             
@@ -111,21 +121,21 @@ class MuziekMachine(BeetsPlugin):
             move_failed = [i for i in self.slsk.dls.values() if i['status'] == 'move_failed']
             not_finished = [i for i in self.slsk.dls.values() if i['status'] == 'not_finished']
 
-            self._log.info("~~~ DOWNLOAD RESULTS ~~~")
-            self._log.info(f"{len(success)} - SUCCESS")
-            self._log.info(f"{len(no_results)} - NO RESULTS")
-            self._log.info(f"{len(no_matches)} - NO MATCHES")
-            self._log.info(f"{len(dl_failed)} - DOWNLOAD FAILED")
-            self._log.info(f"{len(move_failed)} - MOVING FAILED")
-            self._log.info(f"{len(not_finished)} - NOT FINISHED")
-            self._log.info(f" {len(success)} / {len(self.slsk.dls.values())} SUCCESSFUL")
-            self._log.info('~~~~~~~~~~~~~~~~~~~~~~~~')
+            self._log.info("\t ~~~ DOWNLOAD RESULTS ~~~")
+            self._log.info(f"\t {len(success)} - SUCCESS")
+            self._log.info(f"\t {len(no_results)} - NO RESULTS")
+            self._log.info(f"\t {len(no_matches)} - NO MATCHES")
+            self._log.info(f"\t {len(dl_failed)} - DOWNLOAD FAILED")
+            self._log.info(f"\t {len(move_failed)} - MOVING FAILED")
+            self._log.info(f"\t {len(not_finished)} - NOT FINISHED")
+            self._log.info(f"\t {len(success)} / {len(self.slsk.dls.values())} SUCCESSFUL")
+            self._log.info('\t ~~~~~~~~~~~~~~~~~~~~~~~~')
 
-            for i in success:
-                item = i['item']
-                path = i['path']
+            # for i in success:
+            #     item = i['item']
+            #     path = i['path']
 
-                item.path = path
-                item.store()
-    
+            #     item.path = path
+            #     item.store()
+
         return

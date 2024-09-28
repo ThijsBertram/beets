@@ -33,4 +33,4 @@ pipe.parser.add_option('--dl-slsk', action='store_true', help='Download missing 
 pipe.parser.add_option('--analyze', action='store_true')
 pipe.parser.add_option('--type', dest='pl_type', choices=['all', 'mm', 'pl'], default='mm')
 pipe.parser.add_option('--pl-name', dest='pl_name')
-pipe.parser.add_option('--db', action='store_true', default=False)
+pipe.parser.add_option('--db', action='store_true', default=True)

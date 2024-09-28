@@ -7,9 +7,11 @@ from beets.dbcore.query import AndQuery, RegexpQuery
 
 from beetsplug.mm.platforms.SpotifyPlugin import spotify_plugin
 from beetsplug.mm.platforms.YoutubePlugin import youtube_plugin
+from beetsplug.ssp import SongStringParser
 
 # Varia
 import re
+import sqlite3
 import logging
 import datetime
 from functools import wraps
@@ -26,6 +28,7 @@ class PlatformManager(BeetsPlugin):
 
         super().__init__()
         self._log = logging.getLogger('beets.platform_manager')
+        self.ssp = SongStringParser()
 
         # Central command definitions
         self.add_command = Subcommand('add', help='Add tracks to a playlist on a specified platform')
@@ -98,13 +101,25 @@ class PlatformManager(BeetsPlugin):
 
         # GET SONGS
         for platform in platforms:
+            
+            self._log.info(f'\t PULL songs FROM {platform}')
+
             items, song_data = self._retrieve_songs(platform, playlist_name, playlist_type)
             existing_items += items
+
+        self._log.info(f"\t {len(existing_items)} songs PULLED from PLATFORMS")
+
         if db:
+            print(song_data)
             added_to_db = self._insert_songs(lib, song_data)
             new_items += added_to_db
+            self._log.info(f"\t {len(added_to_db)} songs PULLED from DATABASE")
+
+
 
         items = existing_items + new_items
+
+        self._log.info(f"\t {len(items)} songs PULLED in TOTAL")
 
         return items
     
@@ -121,7 +136,14 @@ class PlatformManager(BeetsPlugin):
             # get playlists to process based on filters
             playlists_to_process = self._get_playlists(plugin, playlist_name, playlist_type)
             for playlist in playlists_to_process:
+                existing_songs = list()
+                new_songs = list()
+
                 playlist_name = playlist['playlist_name']
+
+                self._log.info(f"\t\t {playlist_name}")
+
+
                 if playlist:
                     # Get tracks
                     tracks = plugin._get_playlist_tracks(playlist['playlist_id'])
@@ -138,12 +160,10 @@ class PlatformManager(BeetsPlugin):
                         exists = self.lib.items(id_q).get()
 
                         if skip_existing and exists:
-                            self._log.warning(f"SKIPPING (id already known): {exists}")
-                            existing_items.append(exists)
+                            existing_songs.append(exists)
                             continue
 
                         song_data = plugin._parse_track_item(item)
-                        self._log.debug(f" {song_data['artists']} - {song_data['title']} {song_data['remixer']} {song_data['remix_type']}")
                         
                         # add playlist info to track dict
                         song_data['platform'] = platform
@@ -166,7 +186,15 @@ class PlatformManager(BeetsPlugin):
                                 song_data['genre'] = ''
                                 song_data['subgenre'] = ''
                         
-                        new_song_data.append(song_data)
+                        new_songs.append(song_data)
+
+                existing_items += existing_songs
+                new_song_data += new_songs
+
+                self._log.info(f"\t\t\t {len(existing_songs + new_songs)} FOUND")
+                self._log.info(f"\t\t\t {len(existing_songs)} KNOWN")
+                self._log.info(f"\t\t\t {len(new_songs)} UNKNOPWN") 
+
         return existing_items, new_song_data
         
     def _insert_songs(self, lib, songs) -> List[Item]:
@@ -175,23 +203,28 @@ class PlatformManager(BeetsPlugin):
         current_playlist = None
 
         for song_data in songs:
+            try:
+                platform = song_data.pop('platform')
+                p = {key: song_data.pop(key) for key in ['playlist_id', 'playlist_name', 'playlist_description'] if key in song_data}
 
-            platform = song_data.pop('platform')
-            p = {key: song_data.pop(key) for key in ['playlist_id', 'playlist_name', 'playlist_description'] if key in song_data}
 
-            # UPSERT SONG      
-            item = self._store_item(lib, song_data, update_genre=True)
 
-            if not item:
-                self._log.error(f'SONG PROCESSING FAILED: {song_data}')
-                continue
-            # UPSERT PLAYLIST
-            playlist = self._store_playlist(lib, platform, p)
-            # PLAYLIST_ITEM  RELATION
-            self._store_playlist_relation(lib, item.id, playlist['id'])   
+                # UPSERT SONG      
+                item = self._store_item(lib, song_data, update_genre=True)
 
-            self._log.info(f'added SONG: {item.artists}') 
-            items.append(item)
+                if not item:
+                    self._log.error(f'\t\t\t SONG PROCESSING FAILED: {song_data}')
+                    continue
+                # UPSERT PLAYLIST
+                playlist = self._store_playlist(lib, platform, p)
+                # PLAYLIST_ITEM  RELATION
+                self._store_playlist_relation(lib, item.id, playlist['id'])   
+                items.append(item)
+
+                song_string = self.ssp.string_from_item(item)
+                self._log.info(f"\t\t\tADDED TO LIBRARY: {song_string}")
+            except sqlite3.InterfaceError:
+                self._log.info(f"\t\t\tUNABLE TO ADD: {song_data}")
         return items
 
     # HELPER
@@ -217,38 +250,34 @@ class PlatformManager(BeetsPlugin):
         playlists_to_process = [playlist for playlist in playlists_to_process if playlist_type in playlist['playlist_name']] if playlist_type else playlists_to_process
         # filter name
         playlists_to_process = [playlist for playlist in playlists_to_process if playlist_name.lower() in playlist['playlist_name'].lower()] if playlist_name else playlists_to_process
-        
-        self._log.info("PROCESSING")
-        for pl in playlists_to_process:
-            self._log.info(pl['playlist_name'])
 
         return playlists_to_process
     
     # DATABASE METHODS
 
     def _find_item(self, lib, song):
-        title = song['title']
-        remixer = song.get('remixer', '')
-        artists = song.get('artists', '')
-        feat_artist = song.get('feat_artist', '')
-
-        t = RegexpQuery('title', re.escape(title))
-        a = RegexpQuery('artists', re.escape(artists))
-        r = RegexpQuery('remixer', re.escape(remixer))
-        f = RegexpQuery('feat_artist', re.escape(feat_artist))
-
-        queries = [t, a]
-        queries += [r] if remixer else []
-        queries += [f] if feat_artist else []
-
-        c = AndQuery(queries)
-
-        items = lib.items(c)
-
         try:
+            title = song['title']
+            remixer = song.get('remixer', '')
+            artists = song.get('artists', '')
+            feat_artist = song.get('feat_artist', '')
+
+            t = RegexpQuery('title', re.escape(title))
+            a = RegexpQuery('artists', re.escape(artists))
+            r = RegexpQuery('remixer', re.escape(remixer))
+            f = RegexpQuery('feat_artist', re.escape(feat_artist))
+
+            queries = [t, a]
+            queries += [r] if remixer else []
+            queries += [f] if feat_artist else []
+
+            c = AndQuery(queries)
+
+            items = lib.items(c)
             i = items[0]
-        except IndexError:
+        except (IndexError, TypeError):
             i = None
+
         return i
 
     def _find_playlist(self, lib, playlist_name):
