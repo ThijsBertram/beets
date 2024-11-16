@@ -82,7 +82,6 @@ class YouTubePlugin(BeetsPlugin):
             # sand store them in json
             with open(auth_path + '/yt_credentials.json', 'w') as token:
                 token.write(json.dumps(cred_file))
-                print()
         
         self.credentials = credentials
         return 
@@ -106,7 +105,7 @@ class YouTubePlugin(BeetsPlugin):
     def _get_all_playlists(self):
         playlists = []
         request = self.api.playlists().list(
-            part='id,snippet',
+            part='id,snippet,contentDetails',
             mine=True,
             maxResults=50
         )
@@ -145,10 +144,10 @@ class YouTubePlugin(BeetsPlugin):
 
         # ARTISTS
         artists = song_data.pop('artists')
-        if song_data['feat_artist']:
-            artists += [song_data['feat_artist']]
-        if song_data['remixer']:
-            artists += song_data['remixer']
+        # if song_data['feat_artist']:
+        #     artists += [song_data['feat_artist']]
+        # if song_data['remixer']:
+        #     artists += song_data['remixer']
         # remove duplicates and substrings
         substrings = {a for a in artists for other in artists if a != other and a in other}
         artists = [a for a in artists if a not in substrings]
@@ -158,7 +157,6 @@ class YouTubePlugin(BeetsPlugin):
 
         # populate dict 
         song_data['youtube_id'] = item['youtube_id']
-        # song_data['video_id'] = item['video_id']
         song_data['artists'] = artists
         song_data['main_artist'] = main_artist
 
@@ -185,10 +183,10 @@ class YouTubePlugin(BeetsPlugin):
 
         items = []
         for video in videos:
-            track_info = {'youtube_id': video['id'],
+            track_info = {'id': video['id'],
                     'title': video['snippet']['title'],
                     'description': video['snippet']['description'],
-                    'video_id': video['contentDetails']['videoId']}
+                    'youtube_id': video['contentDetails']['videoId']}
             
             try:
                 track_info['channel'] = video['snippet']['videoOwnerChannelTitle']

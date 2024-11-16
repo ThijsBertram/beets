@@ -5,7 +5,7 @@ from openai import OpenAI
 import sqlite3
 import time
 import json
-
+import os
 import re
 
 
@@ -180,8 +180,6 @@ class SongStringParser(BeetsPlugin):
             if char in song_string:
                 return None
 
-
-
         known_duos = self.known_artists
         # Normalize known duos to lowercase for case-insensitive matching
         known_duos_lower = [duo.lower() for duo in known_duos]
@@ -274,7 +272,6 @@ class SongStringParser(BeetsPlugin):
                 # Remove this content and continue processing
                 song_string = re.sub(re.escape(content), '', song_string)
                 continue  # Skip this bracket content and continue
-
             else:
                 return None  # Complex substring found
         
@@ -339,7 +336,6 @@ class SongStringParser(BeetsPlugin):
 
         return results
 
-
     def concat_artists(self, string_list):
         if len(string_list) == 0:
             return ""
@@ -349,3 +345,34 @@ class SongStringParser(BeetsPlugin):
             return ' & '.join(string_list)
         else:
             return ', '.join(string_list[:-1]) + ' & ' + string_list[-1]
+        
+    def string_from_item(self, item, ext=None, path=None):
+        
+        artists = item['artists'][0].split(",") ### ?????????????????????????????????
+        feat_artist = item['feat_artist']
+        remixer = item['remixer']
+        remix_type = item['remix_type']
+        main_artist = item['main_artist']
+        # get unique collab_artists
+        special_artists = set([feat_artist]).union(set([remixer])).union(set([main_artist]))
+        collab_artists = list(set(artists) - special_artists)
+        artists = [main_artist] + collab_artists
+        # artist part
+        artist_part = self.concat_artists(artists)
+        if feat_artist:
+            artist_part += f' feat. {feat_artist}'
+        # title part
+        title_part = item['title']
+        if remixer:
+            title_part += f' ({remixer} {remix_type})'
+        # string
+        s = f'{artist_part} - {title_part}'
+
+        # extension
+        if ext:
+            s += f'.{ext}'
+        # path
+        if path:
+            s = os.path.join(path, s)
+        
+        return s
