@@ -221,7 +221,7 @@ class SoulSeekPlugin(BeetsPlugin):
                 # -
             except Exception as e:
                 if item:
-                    self._log.error(f"\t\t THREAD - {item_id} - {title} - ERROR - {e}")
+                    self._log.error(f"\t\t{item_id} - {self.dls[item.id]['title']} - ERROR - {e}")
                 continue
             # used for joining queue ( can be prettier )
             except AttributeError:
@@ -233,15 +233,15 @@ class SoulSeekPlugin(BeetsPlugin):
 
                 status = self.dls[item.id]['status']        
                 if status == 'no_results':
-                    self._log.info(f'\t\t TRHEAD - {item_id} - {title} - X RESOLVED X - no results')
+                    self._log.info(f'\t\t{item_id} - {self.dls[item.id]['title']} - X RESOLVED X - no results')
                 elif status == 'no_matches':
-                    self._log.info(f'\t\t TRHEAD - {item_id} - {title} - X RESOLVED X - no matches')
+                    self._log.info(f'\t\t{item_id} - {self.dls[item.id]['title']} - X RESOLVED X - no matches')
                 elif status == 'download_failed':
-                    self._log.info(f'\t\t TRHEAD - {item_id} - {title} - X RESOLVED X - dl failed')
+                    self._log.info(f'\t\t{item_id} - {self.dls[item.id]['title']} - X RESOLVED X - dl failed')
                 elif status == 'started':
-                    self._log.info(f'\t\t THREAD - {item_id} - {title} - X RESOLVED X - not finished')
+                    self._log.info(f'\t\t{item_id} - {self.dls[item.id]['title']} - X RESOLVED X - not finished')
                 else:
-                    self._log.info(f'\t\t TRHEAD - {item_id} - {title} - ! RESOLVED ! - download complete')
+                    self._log.info(f'\t\t{item_id} - {self.dls[item.id]['title']} - ! RESOLVED ! - download complete')
                 self.download_queue.task_done()
 
 
