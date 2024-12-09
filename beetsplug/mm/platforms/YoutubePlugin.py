@@ -138,9 +138,11 @@ class YouTubePlugin(BeetsPlugin):
         song_data = self.titleparser.extract_simple_ss(title)
         # ELSE USE CHAPPIE OVERLORD
         if not song_data:
-            title, song_data = self.titleparser.send_gpt_request(args=[title])[0]
-            song_data.pop('confidence')
-
+            try:
+                title, song_data = self.titleparser.send_gpt_request(args=[title])[0]
+                song_data.pop('confidence')
+            except IndexError:
+                return song_data
 
         # ARTISTS
         artists = song_data.pop('artists')

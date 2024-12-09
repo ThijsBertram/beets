@@ -1,0 +1,18 @@
+I am working on a python project based on the existing library 'beets' (see the following links for documentation on beets: https://beets.readthedocs.io/en/stable/ and https://beets.readthedocs.io/en/stable/dev/index.html)
+
+The goal of my project is to expand on the beets framework by building plugins and making minor changes to the for, in order to create my own custom framework for dealing with my music library.
+
+I will give a brief description of the main functionalities I want to be part of my custom beets fork.
+
+- PlatformManager pulgin that extracts information from different musical platforms (youtube, spotify, soundcloud) and stores it in the beets database. Each platform has an own plugin that utilizes that specific platform's API to pull information. The PlatformManager also makes sure playlists remain synced between different platforms. This plugin has some settins about which playlists to sync, which platform should be 'leading' when there are discrepancies between information from different sources etc.
+- Soulseek plugin that utilizes the file sharing service 'soulseek' to download songs that are present in the database, but not yet have a file associated with the database entry. 
+- AudioAnalysis plugin that analyzes the audiofiles for information like bpm, song key etc. 
+- DJ utilities plugin. A plugin that creates setlists in a specific directory (like usb drives) according to a specified folder structure and beets query. 
+- Webapp plugin to interact with the beets library via a webapp. This webapp should provide some visualizations of the libary. It should also provide a way to interact with the library, by searching songs, changing information for specific sons or collection of songs etc. 
+
+I already have a bunch of code to achieve some of the above mentioned functionalities. I have the basics for a platformmanager, and the SPotify & Youtube platform plugin classes are implemented. 
+I also have the first version of the Soulseek plugin, to download missing songs. 
+The existing code for this project can be found at the github page of the project: https://github.com/ThijsBertram/beets/tree/master. I decided to group all the code I'm writing for the custom functionalities within the folder directory './beetsplug/mm/'. This 'mm' folder contains the platform plugins and platform manager, the soulseek stuff, and some other folders for CLI commands, stages and pipelines. 
+
+I want help with this project. Please analyze the beets documentation, so you know how to develop code for the beets libary.
+If you have done that, please check out the github page of my fork. Pay extra close attention to the '/beetsplug/mm/' directory, since that is the place that contains all of my code. 

@@ -232,16 +232,17 @@ class SoulSeekPlugin(BeetsPlugin):
                     continue
 
                 status = self.dls[item.id]['status']        
+                title = self.dls[item.id]['title']
                 if status == 'no_results':
-                    self._log.info(f'\t\t{item_id} - {self.dls[item.id]['title']} - X RESOLVED X - no results')
+                    self._log.info(f'\t\t{item_id} - {title} - X RESOLVED X - no results')
                 elif status == 'no_matches':
-                    self._log.info(f'\t\t{item_id} - {self.dls[item.id]['title']} - X RESOLVED X - no matches')
+                    self._log.info(f'\t\t{item_id} - {title} - X RESOLVED X - no matches')
                 elif status == 'download_failed':
-                    self._log.info(f'\t\t{item_id} - {self.dls[item.id]['title']} - X RESOLVED X - dl failed')
+                    self._log.info(f'\t\t{item_id} - {title} - X RESOLVED X - dl failed')
                 elif status == 'started':
-                    self._log.info(f'\t\t{item_id} - {self.dls[item.id]['title']} - X RESOLVED X - not finished')
+                    self._log.info(f'\t\t{item_id} - {title} - X RESOLVED X - not finished')
                 else:
-                    self._log.info(f'\t\t{item_id} - {self.dls[item.id]['title']} - ! RESOLVED ! - download complete')
+                    self._log.info(f'\t\t{item_id} - {title} - ! RESOLVED ! - download complete')
                 self.download_queue.task_done()
 
 
