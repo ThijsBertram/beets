@@ -1,8 +1,9 @@
 from beets.plugins import BeetsPlugin
 from beetsplug.mm.platforms.PlatformManager import PlatformManager
 from beetsplug.mm.soulseek.SoulseekPlugin import SoulSeekPlugin
+from beetsplug.mm.djutils.DJUtils import DJUtilsPlugin
 from beetsplug.ssp import SongStringParser
-from .cli.pipe_commands import pull_pf, sync_pf, get_items, dl_slsk, analyze, pipe
+from .cli.pipe_commands import pull_pf, sync_pf, get_items, dl_slsk, analyze, pipe, setlist
 
 import os
 import logging
@@ -23,19 +24,38 @@ class MuziekMachine(BeetsPlugin):
         # OBJECTS
         self.pm = PlatformManager()
         self.slsk = SoulSeekPlugin()
+        self.DJUtils = DJUtilsPlugin()
 
         # COMMANDS
         self.pull_pf = pull_pf
+        self.pull_pf.func = self.pm.pull_platform
         self.sync_pf = sync_pf
         self.get_items = get_items
         self.dl_slsk = dl_slsk
         self.analyze = analyze
+        # setlist
+        self.setlist = setlist
+        self.setlist.func = self.DJUtils.create_setlist
+        
         self.pipe = pipe
         self.pipe.func = self.start_pipeline
+        # self.pull_pf = self.pull_platform
 
     def commands(self):
-        return [self.pull_pf, self.sync_pf, self.get_items, self.dl_slsk, self.analyze, self.pipe]
+        return [self.pull_pf, self.sync_pf, self.get_items, self.dl_slsk, self.analyze, self.pipe, self.setlist]
     
+
+    # def pull_platform(self, lib, args, opts):
+    #     print('OPTS')
+    #     print(opts)
+
+    #     print()
+    #     print('ARGS')
+    #     print(args)
+
+    #     return
+
+
     def start_pipeline(self, lib, args, opts):
         
         #stages
