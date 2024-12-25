@@ -1,0 +1,1 @@
+from beetsplug.platforms.platform_manager import PlatformManager

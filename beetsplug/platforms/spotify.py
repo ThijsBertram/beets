@@ -31,14 +31,15 @@ class SpotifyPlugin(BeetsPlugin):
         self.api = self.initialize_api()
         self._log = logging.getLogger('beets.SpotifyPlugin')
 
-        self.pl_to_skip = str(config['mm']['SpotifyPlugin']['pl_to_skip']).split(',')
-        self.valid_pl_prefix = str(config['mm']['SpotifyPlugin']['valid_pl_prefix'])
+        self.pl_to_skip = self.config['pl_to_skip'].get()
+        self.valid_pl_prefix = self.config['valid_pl_prefix'].get()
+
 
     def initialize_api(self):
         return spotipy.Spotify(auth_manager=SpotifyOAuth(
-            client_id = config['mm']['SpotifyPlugin']['client_id'].get(),
-            client_secret = config['mm']['SpotifyPlugin']['client_secret'].get(),
-            redirect_uri = config['mm']['SpotifyPlugin']['redirect_uri'].get(),
+            client_id = self.config['client_id'].get(),
+            client_secret = self.config['client_secret'].get(),
+            redirect_uri = self.config['redirect_uri'].get(),
             scope="playlist-read-private playlist-modify-private playlist-modify-public",
             requests_session = self.session
         ))
