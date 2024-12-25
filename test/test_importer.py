@@ -395,11 +395,13 @@ class ImportSingletonTest(ImportTestCase):
     def test_set_fields(self):
         genre = "\U0001f3b7 Jazz"
         collection = "To Listen"
+        disc = 0
 
         config["import"]["set_fields"] = {
             "collection": collection,
             "genre": genre,
             "title": "$title - formatted",
+            "disc": disc,
         }
 
         # As-is item import.
@@ -412,6 +414,7 @@ class ImportSingletonTest(ImportTestCase):
             assert item.genre == genre
             assert item.collection == collection
             assert item.title == "Tag Track 1 - formatted"
+            assert item.disc == disc
             # Remove item from library to test again with APPLY choice.
             item.remove()
 
@@ -426,6 +429,7 @@ class ImportSingletonTest(ImportTestCase):
             assert item.genre == genre
             assert item.collection == collection
             assert item.title == "Applied Track 1 - formatted"
+            assert item.disc == disc
 
 
 class ImportTest(ImportTestCase):
@@ -583,12 +587,14 @@ class ImportTest(ImportTestCase):
         genre = "\U0001f3b7 Jazz"
         collection = "To Listen"
         comments = "managed by beets"
+        disc = 0
 
         config["import"]["set_fields"] = {
             "genre": genre,
             "collection": collection,
             "comments": comments,
             "album": "$album - formatted",
+            "disc": disc,
         }
 
         # As-is album import.
@@ -608,6 +614,7 @@ class ImportTest(ImportTestCase):
                     item.get("album", with_album=False)
                     == "Tag Album - formatted"
                 )
+                assert item.disc == disc
             # Remove album from library to test again with APPLY choice.
             album.remove()
 
@@ -629,6 +636,7 @@ class ImportTest(ImportTestCase):
                     item.get("album", with_album=False)
                     == "Applied Album - formatted"
                 )
+                assert item.disc == disc
 
 
 class ImportTracksTest(ImportTestCase):
@@ -771,7 +779,8 @@ class ImportCompilationTest(ImportTestCase):
                 asserted_multi_artists_1 = True
                 assert item.artists == ["Another Artist", "Another Artist 2"]
 
-        assert asserted_multi_artists_0 and asserted_multi_artists_1
+        assert asserted_multi_artists_0
+        assert asserted_multi_artists_1
 
 
 class ImportExistingTest(ImportTestCase):
@@ -1320,7 +1329,7 @@ class ResumeImportTest(ImportTestCase):
         # the first album in the second try.
         def raise_exception(event, **kwargs):
             if event == "album_imported":
-                raise importer.ImportAbort
+                raise importer.ImportAbortError
 
         plugins_send.side_effect = raise_exception
 
@@ -1343,7 +1352,7 @@ class ResumeImportTest(ImportTestCase):
         # the first album in the second try.
         def raise_exception(event, **kwargs):
             if event == "item_imported":
-                raise importer.ImportAbort
+                raise importer.ImportAbortError
 
         plugins_send.side_effect = raise_exception
 

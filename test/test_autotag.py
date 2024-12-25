@@ -12,8 +12,7 @@
 # The above copyright notice and this permission notice shall be
 # included in all copies or substantial portions of the Software.
 
-"""Tests for autotagging functionality.
-"""
+"""Tests for autotagging functionality."""
 
 import re
 import unittest
@@ -21,7 +20,7 @@ import unittest
 import pytest
 
 from beets import autotag, config
-from beets.autotag import AlbumInfo, TrackInfo, match
+from beets.autotag import AlbumInfo, TrackInfo, correct_list_fields, match
 from beets.autotag.hooks import Distance, string_dist
 from beets.library import Item
 from beets.test.helper import BeetsTestCase
@@ -48,7 +47,7 @@ class PluralityTest(BeetsTestCase):
         assert freq == 2
 
     def test_plurality_empty_sequence_raises_error(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="must be non-empty"):
             plurality([])
 
     def test_current_metadata_finds_pluralities(self):
@@ -1043,18 +1042,34 @@ class StringDistanceTest(unittest.TestCase):
         assert dist == 0.0
 
 
-class EnumTest(BeetsTestCase):
-    """
-    Test Enum Subclasses defined in beets.util.enumeration
-    """
+@pytest.mark.parametrize(
+    "single_field,list_field",
+    [
+        ("mb_artistid", "mb_artistids"),
+        ("mb_albumartistid", "mb_albumartistids"),
+        ("albumtype", "albumtypes"),
+    ],
+)
+@pytest.mark.parametrize(
+    "single_value,list_value",
+    [
+        (None, []),
+        (None, ["1"]),
+        (None, ["1", "2"]),
+        ("1", []),
+        ("1", ["1"]),
+        ("1", ["1", "2"]),
+        ("1", ["2", "1"]),
+    ],
+)
+def test_correct_list_fields(
+    single_field, list_field, single_value, list_value
+):
+    """Ensure that the first value in a list field matches the single field."""
+    data = {single_field: single_value, list_field: list_value}
+    item = Item(**data)
 
-    def test_ordered_enum(self):
-        OrderedEnumClass = match.OrderedEnum(  # noqa
-            "OrderedEnumTest", ["a", "b", "c"]
-        )
-        assert OrderedEnumClass.a < OrderedEnumClass.b
-        assert OrderedEnumClass.a < OrderedEnumClass.c
-        assert OrderedEnumClass.b < OrderedEnumClass.c
-        assert OrderedEnumClass.b > OrderedEnumClass.a
-        assert OrderedEnumClass.c > OrderedEnumClass.a
-        assert OrderedEnumClass.c > OrderedEnumClass.b
+    correct_list_fields(item)
+
+    single_val, list_val = item[single_field], item[list_field]
+    assert (not single_val and not list_val) or single_val == list_val[0]

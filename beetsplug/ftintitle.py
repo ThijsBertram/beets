@@ -12,8 +12,7 @@
 # The above copyright notice and this permission notice shall be
 # included in all copies or substantial portions of the Software.
 
-"""Moves "featured" artists to the title from the artist field.
-"""
+"""Moves "featured" artists to the title from the artist field."""
 
 import re
 
@@ -38,7 +37,13 @@ def split_on_feat(artist):
 
 def contains_feat(title):
     """Determine whether the title contains a "featured" marker."""
-    return bool(re.search(plugins.feat_tokens(), title, flags=re.IGNORECASE))
+    return bool(
+        re.search(
+            plugins.feat_tokens(for_artist=False),
+            title,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def find_feat_part(artist, albumartist):
@@ -117,9 +122,10 @@ class FtInTitlePlugin(plugins.BeetsPlugin):
     def imported(self, session, task):
         """Import hook for moving featuring artist automatically."""
         drop_feat = self.config["drop"].get(bool)
+        keep_in_artist_field = self.config["keep_in_artist"].get(bool)
 
         for item in task.imported_items():
-            self.ft_in_title(item, drop_feat)
+            self.ft_in_title(item, drop_feat, keep_in_artist_field)
             item.store()
 
     def update_metadata(self, item, feat_part, drop_feat, keep_in_artist_field):

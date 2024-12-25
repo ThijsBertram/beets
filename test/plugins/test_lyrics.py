@@ -14,7 +14,6 @@
 
 """Tests for the 'lyrics' plugin."""
 
-
 import itertools
 import os
 import re
@@ -22,6 +21,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 import confuse
+import pytest
 import requests
 
 from beets import logging
@@ -336,10 +336,7 @@ class LyricsPluginSourcesTest(LyricsGoogleBaseTest, LyricsAssertions):
         LyricsGoogleBaseTest.setUp(self)
         self.plugin = lyrics.LyricsPlugin()
 
-    @unittest.skipUnless(
-        os.environ.get("INTEGRATION_TEST", "0") == "1",
-        "integration testing not enabled",
-    )
+    @pytest.mark.integration_test
     def test_backend_sources_ok(self):
         """Test default backends with songs known to exist in respective
         databases.
@@ -352,10 +349,7 @@ class LyricsPluginSourcesTest(LyricsGoogleBaseTest, LyricsAssertions):
                 res = backend.fetch(s["artist"], s["title"])
                 self.assertLyricsContentOk(s["title"], res)
 
-    @unittest.skipUnless(
-        os.environ.get("INTEGRATION_TEST", "0") == "1",
-        "integration testing not enabled",
-    )
+    @pytest.mark.integration_test
     def test_google_sources_ok(self):
         """Test if lyrics present on websites registered in beets google custom
         search engine are correctly scraped.
@@ -509,14 +503,14 @@ class GeniusFetchTest(GeniusBaseTest):
                         {
                             "result": {
                                 "primary_artist": {
-                                    "name": "\u200Bblackbear",
+                                    "name": "\u200bblackbear",
                                 },
                                 "url": "blackbear_url",
                             }
                         },
                         {
                             "result": {
-                                "primary_artist": {"name": "El\u002Dp"},
+                                "primary_artist": {"name": "El\u002dp"},
                                 "url": "El-p_url",
                             }
                         },
@@ -570,10 +564,7 @@ class TekstowoExtractLyricsTest(TekstowoBaseTest):
         """Ensure we are able to scrape a page with lyrics"""
         url = "https://www.tekstowo.pl/piosenka,24kgoldn,city_of_angels_1.html"
         mock = MockFetchUrl()
-        assert (
-            tekstowo.extract_lyrics(mock(url), "24kGoldn", "City of Angels")
-            is not None
-        )
+        assert tekstowo.extract_lyrics(mock(url))
 
     def test_no_lyrics(self):
         """Ensure we don't crash when the scraping the html for a Tekstowo page
@@ -584,61 +575,7 @@ class TekstowoExtractLyricsTest(TekstowoBaseTest):
             "beethoven_piano_sonata_17_tempest_the_3rd_movement.html"
         )
         mock = MockFetchUrl()
-        assert (
-            tekstowo.extract_lyrics(
-                mock(url),
-                "Beethoven",
-                "Beethoven Piano Sonata 17" "Tempest The 3rd Movement",
-            )
-            is None
-        )
-
-    def test_song_no_match(self):
-        """Ensure we return None when a song does not match the search query"""
-        # https://github.com/beetbox/beets/issues/4406
-        # expected return value None
-        url = (
-            "https://www.tekstowo.pl/piosenka,bailey_bigger"
-            ",black_eyed_susan.html"
-        )
-        mock = MockFetchUrl()
-        assert (
-            tekstowo.extract_lyrics(
-                mock(url), "Kelly Bailey", "Black Mesa Inbound"
-            )
-            is None
-        )
-
-
-class TekstowoParseSearchResultsTest(TekstowoBaseTest):
-    """tests Tekstowo.parse_search_results()"""
-
-    def setUp(self):
-        """Set up configuration"""
-        TekstowoBaseTest.setUp(self)
-        self.plugin = lyrics.LyricsPlugin()
-
-    def test_multiple_results(self):
-        """Ensure we are able to scrape a page with multiple search results"""
-        url = (
-            "https://www.tekstowo.pl/szukaj,wykonawca,juice+wrld"
-            ",tytul,lucid+dreams.html"
-        )
-        mock = MockFetchUrl()
-        assert (
-            tekstowo.parse_search_results(mock(url))
-            == "http://www.tekstowo.pl/piosenka,juice_wrld,"
-            "lucid_dreams__remix__ft__lil_uzi_vert.html"
-        )
-
-    def test_no_results(self):
-        """Ensure we are able to scrape a page with no search results"""
-        url = (
-            "https://www.tekstowo.pl/szukaj,wykonawca,"
-            "agfdgja,tytul,agfdgafg.html"
-        )
-        mock = MockFetchUrl()
-        assert tekstowo.parse_search_results(mock(url)) is None
+        assert not tekstowo.extract_lyrics(mock(url))
 
 
 class TekstowoIntegrationTest(TekstowoBaseTest, LyricsAssertions):
@@ -650,19 +587,13 @@ class TekstowoIntegrationTest(TekstowoBaseTest, LyricsAssertions):
         self.plugin = lyrics.LyricsPlugin()
         tekstowo.config = self.plugin.config
 
-    @unittest.skipUnless(
-        os.environ.get("INTEGRATION_TEST", "0") == "1",
-        "integration testing not enabled",
-    )
+    @pytest.mark.integration_test
     def test_normal(self):
         """Ensure we can fetch a song's lyrics in the ordinary case"""
         lyrics = tekstowo.fetch("Boy in Space", "u n eye")
         self.assertLyricsContentOk("u n eye", lyrics)
 
-    @unittest.skipUnless(
-        os.environ.get("INTEGRATION_TEST", "0") == "1",
-        "integration testing not enabled",
-    )
+    @pytest.mark.integration_test
     def test_no_matching_results(self):
         """Ensure we fetch nothing if there are search results
         returned but no matches"""
@@ -689,12 +620,26 @@ class LRCLibLyricsTest(unittest.TestCase):
         mock_get.return_value.json.return_value = mock_response
         mock_get.return_value.status_code = 200
 
+        self.plugin.config["synced"] = False
         lyrics = lrclib.fetch("la", "la", "la", 999)
         assert lyrics == mock_response["plainLyrics"]
 
         self.plugin.config["synced"] = True
         lyrics = lrclib.fetch("la", "la", "la", 999)
         assert lyrics == mock_response["syncedLyrics"]
+
+    @patch("beetsplug.lyrics.requests.get")
+    def test_fetch_synced_lyrics_fallback(self, mock_get):
+        mock_response = {
+            "syncedLyrics": "",
+            "plainLyrics": "la la la",
+        }
+        mock_get.return_value.json.return_value = mock_response
+        mock_get.return_value.status_code = 200
+
+        self.plugin.config["synced"] = True
+        lyrics = lrclib.fetch("la", "la", "la", 999)
+        assert lyrics == mock_response["plainLyrics"]
 
     @patch("beetsplug.lyrics.requests.get")
     def test_fetch_plain_lyrics(self, mock_get):
@@ -705,6 +650,7 @@ class LRCLibLyricsTest(unittest.TestCase):
         mock_get.return_value.json.return_value = mock_response
         mock_get.return_value.status_code = 200
 
+        self.plugin.config["synced"] = False
         lyrics = lrclib.fetch("la", "la", "la", 999)
 
         assert lyrics == mock_response["plainLyrics"]
@@ -737,28 +683,19 @@ class LRCLibIntegrationTest(LyricsAssertions):
         self.plugin = lyrics.LyricsPlugin()
         lrclib.config = self.plugin.config
 
-    @unittest.skipUnless(
-        os.environ.get("INTEGRATION_TEST", "0") == "1",
-        "integration testing not enabled",
-    )
+    @pytest.mark.integration_test
     def test_track_with_lyrics(self):
         lyrics = lrclib.fetch("Boy in Space", "u n eye", "Live EP", 160)
         self.assertLyricsContentOk("u n eye", lyrics)
 
-    @unittest.skipUnless(
-        os.environ.get("INTEGRATION_TEST", "0") == "1",
-        "integration testing not enabled",
-    )
+    @pytest.mark.integration_test
     def test_instrumental_track(self):
         lyrics = lrclib.fetch(
             "Kelly Bailey", "Black Mesa Inbound", "Half Life 2 Soundtrack", 134
         )
         assert lyrics is None
 
-    @unittest.skipUnless(
-        os.environ.get("INTEGRATION_TEST", "0") == "1",
-        "integration testing not enabled",
-    )
+    @pytest.mark.integration_test
     def test_nonexistent_track(self):
         lyrics = lrclib.fetch("blah", "blah", "blah", 999)
         assert lyrics is None
@@ -786,10 +723,10 @@ class SlugTests(unittest.TestCase):
         assert lyrics.slug(text) == "cafe-au-lait-boisson"
         text = "Multiple  spaces -- and symbols! -- merged"
         assert lyrics.slug(text) == "multiple-spaces-and-symbols-merged"
-        text = "\u200Bno-width-space"
+        text = "\u200bno-width-space"
         assert lyrics.slug(text) == "no-width-space"
 
         # variations of dashes should get standardized
-        dashes = ["\u200D", "\u2010"]
+        dashes = ["\u200d", "\u2010"]
         for dash1, dash2 in itertools.combinations(dashes, 2):
             assert lyrics.slug(dash1) == lyrics.slug(dash2)

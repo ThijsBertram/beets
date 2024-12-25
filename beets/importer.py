@@ -74,7 +74,7 @@ REIMPORT_FRESH_FIELDS_ITEM = list(REIMPORT_FRESH_FIELDS_ALBUM)
 log = logging.getLogger("beets")
 
 
-class ImportAbort(Exception):
+class ImportAbortError(Exception):
     """Raised when the user aborts the tagging operation."""
 
     pass
@@ -360,7 +360,7 @@ class ImportSession:
                 pl.run_parallel(QUEUE_SIZE)
             else:
                 pl.run_sequential()
-        except ImportAbort:
+        except ImportAbortError:
             # User aborted operation. Silently stop.
             pass
 
@@ -605,7 +605,7 @@ class ImportTask(BaseImportTask):
         """
         items = self.imported_items()
         for field, view in config["import"]["set_fields"].items():
-            value = view.get()
+            value = str(view.get())
             log.debug(
                 "Set field {1}={2} for {0}",
                 displayable_path(self.paths),
@@ -627,8 +627,7 @@ class ImportTask(BaseImportTask):
             self.save_progress()
         if session.config["incremental"] and not (
             # Should we skip recording to incremental list?
-            self.skip
-            and session.config["incremental_skip_later"]
+            self.skip and session.config["incremental_skip_later"]
         ):
             self.save_history()
 
@@ -947,7 +946,7 @@ class ImportTask(BaseImportTask):
                 dup_item.remove()
         log.debug(
             "{0} of {1} items replaced",
-            sum(bool(l) for l in self.replaced_items.values()),
+            sum(bool(v) for v in self.replaced_items.values()),
             len(self.imported_items()),
         )
 
@@ -1063,7 +1062,7 @@ class SingletonImportTask(ImportTask):
         values, for the singleton item.
         """
         for field, view in config["import"]["set_fields"].items():
-            value = view.get()
+            value = str(view.get())
             log.debug(
                 "Set field {1}={2} for {0}",
                 displayable_path(self.paths),
