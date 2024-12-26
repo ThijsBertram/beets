@@ -566,7 +566,8 @@ class Item(LibModel):
         "subgenre": types.STRING,
         "spotify_id": types.STRING,
         "youtube_id": types.STRING,
-        "last_edited": DateType()
+        "last_edited": DateType(),
+        "last_edited_ISO": types.STRING,
     }
 
     _search_fields = (

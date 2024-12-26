@@ -1,3 +1,7 @@
+from beets.plugins import BeetsPlugin
+from contextlib import contextmanager
+from beetsplug.platforms_test.platform import Platform
+
 # SF
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
@@ -11,7 +15,6 @@ from typing import List, Dict
 import re
 import requests
 
-from contextlib import contextmanager
 
 @contextmanager
 def spotify_plugin():
@@ -21,24 +24,22 @@ def spotify_plugin():
     finally:
         plugin.cleanup()
 
-class SpotifyPlugin(BeetsPlugin):
 
+class SpotifyPlugin(BeetsPlugin, Platform):
     def __init__(self):
-        super().__init__()
+        BeetsPlugin.__init__(self)
+        Platform.__init__(self) 
 
-        self.session = requests.Session()
-        
-        self.api = self.initialize_api()
         self._log = logging.getLogger('beets.SpotifyPlugin')
-
-        self.pl_to_skip = str(config['mm']['SpotifyPlugin']['pl_to_skip']).split(',')
-        self.valid_pl_prefix = str(config['mm']['SpotifyPlugin']['valid_pl_prefix'])
-
+        self.session = requests.Session()
+        self.api = self.initialize_api()
+        return
+    
     def initialize_api(self):
         return spotipy.Spotify(auth_manager=SpotifyOAuth(
-            client_id = config['mm']['SpotifyPlugin']['client_id'].get(),
-            client_secret = config['mm']['SpotifyPlugin']['client_secret'].get(),
-            redirect_uri = config['mm']['SpotifyPlugin']['redirect_uri'].get(),
+            client_id = self.config['client_id'].get(),
+            client_secret = self.config['client_secret'].get(),
+            redirect_uri = self.config['redirect_uri'].get(),
             scope="playlist-read-private playlist-modify-private playlist-modify-public",
             requests_session = self.session
         ))
@@ -57,8 +58,7 @@ class SpotifyPlugin(BeetsPlugin):
             self._log.debug("Spotify API client dereferenced.")
         except Exception as e:
             self._log.error(f"Error during Spotify API cleanup: {e}")
-
-
+    
     def _get_all_playlists(self) -> List[Dict[str, str]]:
         playlists = []
         offset = 0
@@ -74,6 +74,14 @@ class SpotifyPlugin(BeetsPlugin):
                  'playlist_id': p['id'],
                  'playlist_description': p['description']} for p in playlists]
      
+    
+    
+    
+    
+    
+    
+    
+    
     def _parse_track_item(self, item) -> Dict:
         song_data = dict()
         track = item['track']

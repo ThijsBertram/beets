@@ -5,9 +5,9 @@ from beets.library import Item
 from beets import config
 from beets.dbcore.query import AndQuery, RegexpQuery
 
-from beetsplug.mm.platforms.SpotifyPlugin import spotify_plugin
-from beetsplug.mm.platforms.YoutubePlugin import youtube_plugin
 from beetsplug.ssp import SongStringParser
+from beetsplug.platforms.spotify import spotify_plugin
+# from beetsplug.platforms.youtube import youtube_plugin
 
 # Varia
 import re

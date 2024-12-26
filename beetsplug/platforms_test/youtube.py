@@ -1,3 +1,12 @@
+from beets.plugins import BeetsPlugin
+from contextlib import contextmanager
+from beetsplug.platforms_test.platform import Platform
+# Varia
+import logging
+from typing import List, Dict
+import re
+import requests
+
 
 # YT
 import google_auth_oauthlib.flow
@@ -25,31 +34,30 @@ import json
 
 from contextlib import contextmanager
 
+
 @contextmanager
 def youtube_plugin():
-    plugin = YouTubePlugin()
+    plugin = YoutubePlugin()
     try:
         yield plugin
     finally:
         plugin.cleanup()
 
-class YouTubePlugin(BeetsPlugin):
 
+class YoutubePlugin(BeetsPlugin):
     def __init__(self):
-        super().__init__()
+        BeetsPlugin.__init__(self)
+        Platform.__init__(self) 
 
-        self.pl_to_skip = str(config['mm']['YoutubePlugin']['pl_to_skip']).split(',')
-        self.valid_pl_prefix = str(config['mm']['YoutubePlugin']['valid_pl_prefix'])
+        self._log = logging.getLogger('beets.SpotifyPlugin')
 
-        self.authenticate()
-
+        self.api = self.authenticate()
         # init api
         self.api = self.initialize_youtube_api()
         # init SSP
         self.titleparser = ssp.SongStringParser()
-        # logger
-        self._log = logging.getLogger('beets.spotify_custom')
-
+        return
+    
     def authenticate(self):
         # create directory to save credentials if it does not exits    
         auth_path = os.path.join(os.curdir, 'auth')
@@ -60,8 +68,8 @@ class YouTubePlugin(BeetsPlugin):
         # OAUTH
         credentials = None
         # check if stored credentials are still valid
-        scopes = str(config['mm']['YoutubePlugin']['scopes'])
-        secrets_file = str(config['mm']['YoutubePlugin']['secrets_file']) 
+        scopes = self.config['scopes'].get()
+        secrets_file = self.config['secrets_file'].get()
         try:
             credentials = Credentials.from_authorized_user_file(auth_path + '/yt_credentials.json', [scopes])
             credentials.refresh(Request())
@@ -88,8 +96,8 @@ class YouTubePlugin(BeetsPlugin):
 
     def initialize_youtube_api(self):
         
-        api_name = str(config['mm']['YoutubePlugin']['api_name'])
-        api_version = str(config['mm']['YoutubePlugin']['api_version'])
+        api_name = self.config['api_name'].get()
+        api_version = self.config['api_version'].get()
 
         api_object = googleapiclient.discovery.build(api_name, api_version, credentials=self.credentials)
         return api_object
@@ -100,9 +108,9 @@ class YouTubePlugin(BeetsPlugin):
             self._log.debug("Youtube API client dereferenced")
         except Exception as e:
             self._log.error(f"Error during Spotify API cleanup: {e}")
-    
-    
+     
     def _get_all_playlists(self):
+
         playlists = []
         request = self.api.playlists().list(
             part='id,snippet,contentDetails',
@@ -125,6 +133,42 @@ class YouTubePlugin(BeetsPlugin):
 
         return playlists
     
+    def _get_playlist_tracks(self, playlist_id: str) -> List[Dict[str, Union[str, int, float]]]:
+
+        videos = []
+        request = self.api.playlistItems().list(
+            part='contentDetails,snippet',
+            playlistId=playlist_id,
+            maxResults=50
+        )
+
+        while request:
+            try:
+                response = request.execute()
+                videos.extend(response['items'])
+                request = self.api.playlistItems().list_next(request, response)
+            except HttpError as e:
+                print(f"An HTTP error {e.resp.status} occurred: {e.content}")
+                break
+
+        items = []
+        for video in videos:
+            track_info = {'id': video['id'],
+                    'title': video['snippet']['title'],
+                    'description': video['snippet']['description'],
+                    'youtube_id': video['contentDetails']['videoId']}
+    
+            try:
+                track_info['channel'] = video['snippet']['videoOwnerChannelTitle']
+            except KeyError:
+                self._log.warning(f"{video['snippet']['title']} in playlist: {playlist_id}")
+                continue
+
+            items.append(track_info)
+
+        tracks = {'items': items}
+        return tracks
+    
     def _parse_track_item(self, item) -> Dict:
         song_data = dict()
 
@@ -136,12 +180,14 @@ class YouTubePlugin(BeetsPlugin):
             title = a + ' - ' + title
         # PARSE USING SIMPLE PARSER
         song_data = self.titleparser.extract_simple_ss(title)
+
         # ELSE USE CHAPPIE OVERLORD
         if not song_data:
             try:
                 title, song_data = self.titleparser.send_gpt_request(args=[title])[0]
                 song_data.pop('confidence')
-            except IndexError:
+            except IndexError as e:
+                self._log.error(f"ERROR parsing {title}: {e}")
                 return song_data
 
         # ARTISTS
@@ -165,42 +211,3 @@ class YouTubePlugin(BeetsPlugin):
 
 
         return song_data
-    
-    def _get_playlist_tracks(self, playlist_id: str) -> List[Dict[str, Union[str, int, float]]]:
-        videos = []
-        request = self.api.playlistItems().list(
-            part='contentDetails,snippet',
-            playlistId=playlist_id,
-            maxResults=50
-        )
-
-        while request:
-            try:
-                response = request.execute()
-                videos.extend(response['items'])
-                request = self.api.playlistItems().list_next(request, response)
-            except HttpError as e:
-                print(f"An HTTP error {e.resp.status} occurred: {e.content}")
-                break
-
-        items = []
-        for video in videos:
-            track_info = {'id': video['id'],
-                    'title': video['snippet']['title'],
-                    'description': video['snippet']['description'],
-                    'youtube_id': video['contentDetails']['videoId']}
-            
-            try:
-                track_info['channel'] = video['snippet']['videoOwnerChannelTitle']
-            except KeyError:
-                self._log.warning(f"{video['snippet']['title']} in playlist: {playlist_id}")
-                continue
-
-            items.append(track_info)
-
-        tracks = {'items': items}
-        return tracks
-    
-    
-        
-
