@@ -148,17 +148,25 @@ class PlatformManager(BeetsPlugin):
         # dict of platform_name: [playlists_to_process]
         playlists_to_process = dict([(platform, list()) for platform in VALID_PLATFORMS])
         for platform_name, pl in playlists.items():
-            if playlist_name != 'all':
+            if playlist_name == 'all':
                 playlists_to_process[platform_name].extend([p for p in pl if (
-                    (playlist_name.lower() in p['playlist_name'].lower()) &     # filter name
-                    (playlist_type in p['playlist_name']) &                     # filter type
-                    (playlist_name not in plugin.pl_to_skip)                    # filter ignore
+                    (playlist_type in p['playlist_name']) and                   # filter type
+                    (playlist_name not in plugin.pl_to_skip) and                # filter ignore
+                    not (' pl ' in p['playlist_name'] and playlist_type == 'mm')  # Additional condition
+                )])            
+            else:
+                playlists_to_process[platform_name].extend([p for p in pl if (
+                    (playlist_name.lower() in p['playlist_name'].lower()) and    # filter name
+                    (playlist_type in p['playlist_name']) and                    # filter type
+                    (playlist_name not in plugin.pl_to_skip) and                   # filter ignore
+                    not (' pl ' in p['playlist_name'] and playlist_type == 'mm')  # Additional condition
+
                 )])
 
         for platform in VALID_PLATFORMS:
             color = PLATFORM_LOG_COLOR[platform]
             self._log.info(f"{YELLOW}{len(playlists_to_process[platform])} playlists{RESET} to process for {color}{platform}{RESET}")
-
+        self._log.info("")
         # ========================
         # 2. RETRIEVE SONGS
         # ========================
@@ -190,7 +198,7 @@ class PlatformManager(BeetsPlugin):
                         
                             song_data.append(SongData(**track).model_dump())
                         except Exception as e:
-                            self._log.error(f"Error adding playlist info to track: {e}")
+                            self._log.error(f"Error adding playlist info to track {e}")
                             continue
                     
                     color = PLATFORM_LOG_COLOR[platform_name]
@@ -241,7 +249,6 @@ class PlatformManager(BeetsPlugin):
             artists = ','.join(sorted(list(set(song.pop('artists')))))
             song['artists'] = artists
             
-            
             item = self._get_item_if_exists(lib, song)
 
             if item:
@@ -251,7 +258,6 @@ class PlatformManager(BeetsPlugin):
                 is_new = True
                 row_id = None
                 song['added'] = datetime.datetime.now().timestamp()
-
 
             query, subvals = self._gen_store_item_q(song, row_id=row_id, is_new_row=is_new)
 
@@ -320,7 +326,7 @@ class PlatformManager(BeetsPlugin):
             q = f'{platform}_id:"{platform_id}"'
             item = self.lib.items(q).get()
             if item:
-                self._log.debug(f"Found item {item} using {platform} id")
+                self._log.info(f"{YELLOW_BRIGHT}Found item {RESET}{item} using {platform} id")
                 return item
         
         # Check if song exists in db using title and artist
@@ -347,6 +353,6 @@ class PlatformManager(BeetsPlugin):
                 item = items[0]
             except (IndexError, TypeError) as e:
                 item = None
-                self._log.debug(f"Item {song['artist'] - song['title']} not found in db: {e}")
+                self._log.debug(f"Item {song['main_artist']} - {song['title']} not found in db: {e}")
             return item
     

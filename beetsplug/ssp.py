@@ -329,7 +329,7 @@ class SongStringParser(BeetsPlugin):
             try:
                 response = self.parser.parse_song_string(song_string)
                 # print(response)
-                self._log.info(f'CHATGPT CORRECTLY PARSED Song String: {song_string}\n\n')
+                # self._log.info(f'CHATGPT CORRECTLY PARSED Song String: {song_string}\n\n')
                 results.append((song_string, response))
             except Exception as e:
                 self._log.error(f"Error processing song string {song_string}: {e}")

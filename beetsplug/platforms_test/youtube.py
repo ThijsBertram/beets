@@ -186,8 +186,9 @@ class YoutubePlugin(BeetsPlugin):
             try:
                 title, song_data = self.titleparser.send_gpt_request(args=[title])[0]
                 song_data.pop('confidence')
-            except IndexError as e:
+            except (IndexError, KeyError) as e:
                 self._log.error(f"ERROR parsing {title}: {e}")
+                print(song_data)
                 return song_data
 
         # ARTISTS
@@ -197,9 +198,19 @@ class YoutubePlugin(BeetsPlugin):
         # if song_data['remixer']:
         #     artists += song_data['remixer']
         # remove duplicates and substrings
+        if not artists:
+            raise ValueError("The 'artists' list is empty before deduplication.")
+
+        # Remove duplicates based on substrings
         substrings = {a for a in artists for other in artists if a != other and a in other}
         artists = [a for a in artists if a not in substrings]
-        main_artist = artists[0]
+
+        # Safely access the first element
+        if artists:
+            main_artist = artists[0]
+        else:
+            raise ValueError("No main artist can be selected because the 'artists' list is empty after deduplication.")
+
         # sort
         artists = sorted(artists)
 

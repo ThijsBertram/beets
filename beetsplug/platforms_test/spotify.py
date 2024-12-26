@@ -73,14 +73,6 @@ class SpotifyPlugin(BeetsPlugin, Platform):
         return [{'playlist_name': p['name'], 
                  'playlist_id': p['id'],
                  'playlist_description': p['description']} for p in playlists]
-     
-    
-    
-    
-    
-    
-    
-    
     
     def _parse_track_item(self, item) -> Dict:
         song_data = dict()
@@ -122,7 +114,20 @@ class SpotifyPlugin(BeetsPlugin, Platform):
         return song_data
     
     def _get_playlist_tracks(self, playlist_id):
-        tracks = self.api.playlist_tracks(playlist_id)
+        tracks = {'items': list()}
+        offset = 0
+        limit = 100  # Maximum limit per request allowed by Spotify API
+
+        while True:
+            # Fetch a page of tracks
+            response = self.api.playlist_tracks(playlist_id, limit=limit, offset=offset)
+            tracks['items'].extend(response['items'])  # Add current page of tracks to the list
+            
+            # Check if there's another page
+            if response['next'] is None:
+                break  # No more pages to fetch
+            offset += limit  # Update the offset for the next page
+
         return tracks
     
    
