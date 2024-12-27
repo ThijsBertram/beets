@@ -353,6 +353,8 @@ class PlatformManager(BeetsPlugin):
                 item = items[0]
             except (IndexError, TypeError) as e:
                 item = None
-                self._log.debug(f"Item {song['main_artist']} - {song['title']} not found in db: {e}")
+                self._log.debug(f"Item not found in db: {e}")
+            
+            self._log.info(f"{YELLOW_BRIGHT}Found item {RESET}{item} using song info")
             return item
     
