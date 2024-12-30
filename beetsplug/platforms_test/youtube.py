@@ -1,12 +1,13 @@
 from beets.plugins import BeetsPlugin
 from contextlib import contextmanager
-from beetsplug.platforms_test.platform import Platform
+from beetsplug.platforms_test.platform import Platform, MATCH_KEYS, QUERY_KEYS
 # Varia
 import logging
 from typing import List, Dict
 import re
 import requests
-
+from beetsplug.models.songdata import SongData
+from fuzzywuzzy import fuzz
 
 # YT
 import google_auth_oauthlib.flow
@@ -24,7 +25,6 @@ from google.auth.exceptions import RefreshError
 from beets.plugins import BeetsPlugin
 from beets import config
 import beetsplug.ssp as ssp
-
 # Varia
 import logging
 from typing import List, Dict, Union
@@ -50,6 +50,7 @@ class YoutubePlugin(BeetsPlugin):
         Platform.__init__(self) 
 
         self._log = logging.getLogger('beets.SpotifyPlugin')
+        self._pm_log = logging.getLogger('beets.PlatformManager')
 
         self.api = self.authenticate()
         # init api
@@ -169,7 +170,8 @@ class YoutubePlugin(BeetsPlugin):
         tracks = {'items': items}
         return tracks
     
-    def _parse_track_item(self, item) -> Dict:
+    def _parse_track_item(self, lib, item) -> Dict:
+
         song_data = dict()
 
         # get title
@@ -180,6 +182,14 @@ class YoutubePlugin(BeetsPlugin):
             title = a + ' - ' + title
         # PARSE USING SIMPLE PARSER
         song_data = self.titleparser.extract_simple_ss(title)
+
+        q = f"youtube_id:{item['youtube_id']}"
+        song_exists = lib.items(q).get()
+
+        if song_exists:
+            song_data = SongData(**dict(song_exists)).model_dump()
+            self._pm_log.info(f"{song_data['main_artist']} - {song_data['title']} \033[38;5;220malready exists\033[0m in the library.")
+            return song_data
 
         # ELSE USE CHAPPIE OVERLORD
         if not song_data:
@@ -197,6 +207,10 @@ class YoutubePlugin(BeetsPlugin):
         # if song_data['remixer']:
         #     artists += song_data['remixer']
         # remove duplicates and substrings
+        if not artists:
+            self._pm_log.error("The 'artists' list is empty before deduplication.")
+            return dict()
+        # Remove duplicates based on substrings
         substrings = {a for a in artists for other in artists if a != other and a in other}
         artists = [a for a in artists if a not in substrings]
         main_artist = artists[0]
@@ -211,3 +225,156 @@ class YoutubePlugin(BeetsPlugin):
 
 
         return song_data
+    
+
+
+    def search_track_youtube(self, 
+                             track: Dict[str, str], 
+                             query_keys: List[str] = QUERY_KEYS) -> List[Dict[str, str]]:
+        """
+        Search for a track on YouTube using metadata. If no matches are found with all query keys,
+        retry with a simplified query using only 'artist' and 'title'.
+
+        Args:
+            track (Dict[str, str]): A dictionary containing track metadata.
+            query_keys (List[str]): A list of keys to use for constructing the query.
+
+        Returns:
+            List[Dict[str, str]]: List of search result items from YouTube API.
+        """
+        try:
+            query_parts = [track[key] for key in query_keys if track.get(key)]
+            query = " ".join(query_parts)
+
+            # Perform search on YouTube
+            search_response = self.api.search().list(
+                q=query,
+                type="video",
+                part="id,snippet",
+                maxResults=10
+            ).execute()
+
+            search_results = search_response.get("items", [])
+
+            # If no results, retry with simplified query
+            if not search_results:
+                self._log.warning("No results found with full query, retrying with simplified query.")
+                query = f"{track['artist']} {track['title']}"
+                search_response = self.api.search().list(
+                    q=query,
+                    type="video",
+                    part="id,snippet",
+                    maxResults=10
+                ).execute()
+                search_results = search_response.get("items", [])
+
+            return search_results
+        except Exception as e:
+            self._log.error(f"Error searching for track with metadata {track}: {e}")
+            return []
+
+    def match_results_youtube(self, 
+                              track: Dict[str, str], 
+                              search_results: List[Dict[str, str]], 
+                              match_keys: List[str] = MATCH_KEYS, 
+                              fuzz_threshold: int = 90) -> str:
+        """
+        Match a track with search results based on metadata using fuzzy matching.
+
+        Args:
+            track (Dict[str, str]): A dictionary containing track metadata.
+            search_results (List[Dict[str, str]]): List of search result items from YouTube API.
+            match_keys (List[str]): A list of keys to use for matching results.
+            fuzz_threshold (int): Minimum fuzzy match score for a key/value pair to be considered a match.
+
+        Returns:
+            str: YouTube video ID if a match is found, None otherwise.
+        """
+        for item in search_results:
+            item_metadata = {
+                "title": item["snippet"]["title"].lower(),
+                "channel": item["snippet"].get("channelTitle", "").lower(),
+            }
+
+            if all(
+                fuzz.partial_ratio(track.get(key, "").lower(), item_metadata.get(key, "")) >= fuzz_threshold
+                for key in match_keys if track.get(key)
+            ):
+                return item["id"]["videoId"]
+        return None
+
+    def add_songs_to_playlist_youtube(self, 
+                                      playlist_id: str, 
+                                      tracks: List[Dict[str, str]], 
+                                      query_keys: List[str] = QUERY_KEYS, 
+                                      match_keys: List[str] = MATCH_KEYS, 
+                                      fuzz_threshold: int = 90) -> Dict:
+        """
+        Add songs to a YouTube playlist and return information about newly found IDs and playlist-item relationships.
+
+        Args:
+            playlist_id (str): The ID of the YouTube playlist.
+            tracks (List[Dict[str, str]]): A list of dictionaries containing track metadata.
+            query_keys (List[str]): A list of keys to use for constructing the search query.
+            match_keys (List[str]): A list of keys to use for matching search results.
+            fuzz_threshold (int): Minimum fuzzy match score for matching key/value pairs.
+
+        Returns:
+            Dict: A dictionary containing:
+                - 'new_platform_ids': List of tuples (song_id, youtube_id).
+                - 'playlist_items': List of tuples (playlist_id, song_id).
+        """
+        track_ids = []
+        total_tracks = len(tracks)
+        not_found_count = 0
+
+        self._log.info(f"Adding {total_tracks} songs to playlist {playlist_id} on YouTube.")
+
+        new_platform_ids = []
+        playlist_items = []
+
+        for track in tracks:
+            song_id = track.get("song_id")  # Assuming the parent class provides 'song_id'
+            search_results = self.search_track_youtube(track, query_keys)
+            matched_track_id = self.match_results_youtube(track, search_results, match_keys, fuzz_threshold=fuzz_threshold)
+
+            if matched_track_id:
+                track_ids.append(matched_track_id)
+                self._log.info(f"Matched track: {track['title']} by {track['artist']}")
+
+                # Collect new platform ID
+                if song_id:
+                    new_platform_ids.append((song_id, matched_track_id))
+                # Collect playlist-item relationship
+                playlist_items.append((playlist_id, song_id))
+            else:
+                self._log.warning(f"No match found for track: {track['title']} by {track['artist']}")
+                not_found_count += 1
+
+        if not track_ids:
+            self._log.warning("No valid track IDs to add to the playlist.")
+            return {"new_platform_ids": new_platform_ids, "playlist_items": playlist_items}
+
+        for track_id in track_ids:
+            try:
+                self.api.playlistItems().insert(
+                    part="snippet",
+                    body={
+                        "snippet": {
+                            "playlistId": playlist_id,
+                            "resourceId": {
+                                "kind": "youtube#video",
+                                "videoId": track_id,
+                            }
+                        }
+                    }
+                ).execute()
+                self._log.info(f"Added track with ID {track_id} to playlist {playlist_id}.")
+            except Exception as e:
+                self._log.error(f"Failed to add track with ID {track_id} to playlist {playlist_id}: {e}")
+
+        self._log.info(f"Successfully added {len(track_ids)}/{total_tracks} tracks to playlist {playlist_id}.")
+        if not_found_count > 0:
+            self._log.info(f"{not_found_count}/{total_tracks} tracks could not be found.")
+
+        return {"new_platform_ids": new_platform_ids, "playlist_items": playlist_items}

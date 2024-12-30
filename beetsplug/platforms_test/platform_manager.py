@@ -84,6 +84,8 @@ class PlatformManager(BeetsPlugin):
     def commands(self):
         return [self.pull_command]
         
+    # PULL PLATFORM INTO DB
+    
     def pull_platform(self, lib, opts, args):
         """This function pulls song_data from the specified platform and adds it to the library.
 
@@ -134,7 +136,7 @@ class PlatformManager(BeetsPlugin):
             if type(platforms) == str:
                 platforms = [platforms]
         
-        platforms = dict([(platform, self._pull_platform_get_plugin(platform)) for platform in platforms])
+        platforms = dict([(platform, self._get_plugin(platform)) for platform in platforms])
 
         # 1.2 get all playlists
         # dict of platform_name: [playlists]
@@ -150,9 +152,22 @@ class PlatformManager(BeetsPlugin):
         for platform_name, pl in playlists.items():
             if playlist_name != 'all':
                 playlists_to_process[platform_name].extend([p for p in pl if (
+<<<<<<< Updated upstream
                     (playlist_name.lower() in p['playlist_name'].lower()) &     # filter name
                     (playlist_type in p['playlist_name']) &                     # filter type
                     (playlist_name not in plugin.pl_to_skip)                    # filter ignore
+=======
+                    (playlist_type in p['playlist_name']) and                   # filter type
+                    (playlist_name not in plugin.pl_to_skip) and                # filter ignore
+                    not (' pl ' in p['playlist_name'] and playlist_type == 'mm')  # Additional condition
+                )])            
+            else:
+                playlists_to_process[platform_name].extend([p for p in pl if (
+                    (playlist_name.lower() in p['playlist_name'].lower()) and    # filter name
+                    (playlist_type in p['playlist_name']) and                    # filter type
+                    (playlist_name not in plugin.pl_to_skip) and                   # filter ignore
+                    not (' pl ' in p['playlist_name'] and playlist_type == 'mm')  # Additional condition
+>>>>>>> Stashed changes
                 )])
 
         for platform in VALID_PLATFORMS:
@@ -162,7 +177,6 @@ class PlatformManager(BeetsPlugin):
         # ========================
         # 2. RETRIEVE SONGS
         # ========================
-        song_data = list()
         for platform_name, playlists in playlists_to_process.items():
             if not playlists:
                 continue
@@ -170,13 +184,16 @@ class PlatformManager(BeetsPlugin):
 
             with platform() as plugin:
                 for playlist in playlists:
-                    
+                    song_data = list()
                     # get tracks for playlist
                     tracks = plugin._get_playlist_tracks(playlist['playlist_id'])
-                    parsed_tracks = [plugin._parse_track_item(item) for item in tracks['items']]
+                    # parse track
+                    parsed_tracks = [plugin._parse_track_item(lib, item) for item in tracks['items']]
                     
                     # add playlist info to track dict
                     for track in parsed_tracks:
+                        if not track: 
+                            continue
                         try:
                             track['platform'] = platform_name
                             track['playlist_name'] = playlist['playlist_name']
@@ -196,24 +213,17 @@ class PlatformManager(BeetsPlugin):
                     color = PLATFORM_LOG_COLOR[platform_name]
                     self._log.info(f"{BLUE_BRIGHT}{len(parsed_tracks)} songs{RESET} found in {BLUE_BRIGHT}{playlist['playlist_name']}{RESET} on {color}{platform_name}{RESET}")
            
-        # ========================
-        # 3. ADD SONGS TO DATABASE
-        # ========================
-        # 3.1 check if track exists in db
-        # 3.1.1 based on youtube id
-        # 3.1.2 based on spotify id
-        # 3.1.3 based on title and artist
-        # 3.2 if track does not exist, add to db
-        # 3.3 if track exists, update track info
-        if not no_db:
-            new, existing = self.add_to_db(lib, song_data)
+                    if not no_db:
+                        new, existing = self.add_to_db(lib, song_data)
 
-            self._log.info(f"{CYAN}{len(new)}{RESET} new songs added to the database{RESET}")
-            self._log.info(f"{CYAN}{len(existing)}{RESET} existing songs updated in the database{RESET}")
-            self._log.info(f"{CYAN}{len(new) + len(existing)}/{len(song_data)}{RESET} total songs processed{RESET}")
-            self._log.info("")
+                        self._log.info(f"{CYAN}{len(new)}{RESET} new songs added to the database{RESET}")
+                        self._log.info(f"{CYAN}{len(existing)}{RESET} existing songs updated in the database{RESET}")
+                        self._log.info(f"{CYAN}{len(new) + len(existing)}/{len(song_data)}{RESET} total songs processed{RESET}")
+                        self._log.info("") 
 
-    def _pull_platform_get_plugin(self, platform):
+    # SYNC PLATFORMS
+    
+    def _get_plugin(self, platform):
         """Return the appropriate plugin class based on the platform."""
         if platform == 'spotify' :
             return spotify_plugin
@@ -320,7 +330,11 @@ class PlatformManager(BeetsPlugin):
             q = f'{platform}_id:"{platform_id}"'
             item = self.lib.items(q).get()
             if item:
+<<<<<<< Updated upstream
                 self._log.debug(f"Found item {item} using {platform} id")
+=======
+                # self._log.info(f"{YELLOW_BRIGHT}Found item {RESET}{item} using {platform} id")
+>>>>>>> Stashed changes
                 return item
         
         # Check if song exists in db using title and artist
@@ -347,6 +361,12 @@ class PlatformManager(BeetsPlugin):
                 item = items[0]
             except (IndexError, TypeError) as e:
                 item = None
+<<<<<<< Updated upstream
                 self._log.debug(f"Item {song['artist'] - song['title']} not found in db: {e}")
+=======
+                self._log.debug(f"Item not found in db: {e}")
+            
+            # self._log.info(f"{YELLOW_BRIGHT}Found item {RESET}{item} using song info")
+>>>>>>> Stashed changes
             return item
     

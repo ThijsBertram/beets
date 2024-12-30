@@ -1,10 +1,13 @@
 from abc import ABC, abstractmethod
 from typing import Dict, List, Union
 import logging
+from beets.library import Library
 
 
 VALID_PLATFORMS = ['spotify', 'youtube']
 VALID_PLAYLIST_TYPES = ['mm', 'pl', 'sl', 'all']
+MATCH_KEYS = ['title', 'main_artist', 'artists', 'genre', 'subgenre', 'remixer', 'remix_type']
+QUERY_KEYS = ['title', 'main_artist', 'artists', 'genre', 'subgenre', 'remixer', 'remix_type']
 
 class Platform(ABC):
     def __init__(self):
@@ -38,6 +41,6 @@ class Platform(ABC):
         pass
 
     @abstractmethod
-    def _parse_track_item(self, item: Dict) -> Dict:
+    def _parse_track_item(self, lib: Library, item: Dict) -> Dict:
         """Parse individual track data into a standardized format."""
         pass

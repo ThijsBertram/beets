@@ -1,6 +1,6 @@
 from beets.plugins import BeetsPlugin
 from contextlib import contextmanager
-from beetsplug.platforms_test.platform import Platform
+from beetsplug.platforms_test.platform import Platform, QUERY_KEYS, MATCH_KEYS
 
 # SF
 import spotipy
@@ -10,6 +10,8 @@ from beets.plugins import BeetsPlugin
 from beets import config
 
 # Varia
+from fuzzywuzzy import fuzz
+
 import logging
 from typing import List, Dict
 import re
@@ -82,7 +84,7 @@ class SpotifyPlugin(BeetsPlugin, Platform):
     
     
     
-    def _parse_track_item(self, item) -> Dict:
+    def _parse_track_item(self, lib, item) -> Dict:
         song_data = dict()
         track = item['track']
         # title
@@ -126,3 +128,148 @@ class SpotifyPlugin(BeetsPlugin, Platform):
         return tracks
     
    
+
+
+
+
+    def search_track(self, 
+                     track: Dict[str, str], 
+                     query_keys: List[str] = QUERY_KEYS) -> List[Dict[str, str]]:
+        """
+        Search for a track on Spotify using metadata. If no matches are found with all query keys,
+        retry with a simplified query using only 'artist' and 'title'.
+
+        Args:
+            track (Dict[str, str]): A dictionary containing track metadata.
+            query_keys (List[str]): A list of keys to use for constructing the query.
+
+        Returns:
+            List[Dict[str, str]]: List of search result items from Spotify API.
+        """
+        try:
+            query_parts = [f"{key}:{track[key]}" for key in query_keys if track.get(key)]
+            query = " ".join(query_parts)
+
+            # Perform search on Spotify
+            search_results = self.api.search(q=query, type='track', limit=10)
+
+            # If no results, retry with simplified query
+            if not search_results['tracks']['items']:
+                self._log.warning("No results found with full query, retrying with simplified query.")
+                query = f"artist:{track['artist']} track:{track['title']}"
+                search_results = self.api.search(q=query, type='track', limit=10)
+
+            return search_results['tracks']['items']
+        except Exception as e:
+            self._log.error(f"Error searching for track with metadata {track}: {e}")
+            return []
+
+    def match_results(self, 
+                      track: Dict[str, str], 
+                      search_results: List[Dict[str, str]], 
+                      match_keys: List[str] = MATCH_KEYS, 
+                      fuzz_threshold: int = 90) -> str:
+        """
+        Match a track with search results based on metadata using fuzzy matching.
+
+        Args:
+            track (Dict[str, str]): A dictionary containing track metadata.
+            search_results (List[Dict[str, str]]): List of search result items from Spotify API.
+            match_keys (List[str]): A list of keys to use for matching results.
+            fuzz_threshold (int): Minimum fuzzy match score for a key/value pair to be considered a match.
+
+        Returns:
+            str: Spotify track ID if a match is found, None otherwise.
+        """
+        for item in search_results:
+            item_metadata = {
+                "artist": [artist['name'] for artist in item['artists']],
+                "title": item['name'].split(' - ')[0].lower(),
+                "full_title": item['name'].lower(),
+            }
+
+            if all(
+                (key == "artist" and any(
+                    fuzz.ratio(track[key].lower(), artist.lower()) >= fuzz_threshold
+                    for artist in item_metadata[key]
+                )) or
+                (key != "artist" and fuzz.partial_ratio(track.get(key, "").lower(), item_metadata.get(key, "")) >= fuzz_threshold)
+                for key in match_keys if track.get(key)
+            ):
+                return item['id']
+        return None
+
+    def add_songs_to_playlist_youtube(self, playlist_id: str, 
+                                      tracks: List[Dict[str, str]], 
+                                      query_keys: List[str] = QUERY_KEYS, 
+                                      match_keys: List[str] = MATCH_KEYS, 
+                                      fuzz_threshold: int = 90) -> Dict:
+        """
+        Add songs to a YouTube playlist and return information about newly found IDs and playlist-item relationships.
+
+        Args:
+            playlist_id (str): The ID of the YouTube playlist.
+            tracks (List[Dict[str, str]]): A list of dictionaries containing track metadata.
+            query_keys (List[str]): A list of keys to use for constructing the search query.
+            match_keys (List[str]): A list of keys to use for matching search results.
+            fuzz_threshold (int): Minimum fuzzy match score for matching key/value pairs.
+
+        Returns:
+            Dict: A dictionary containing:
+                - 'new_platform_ids': List of tuples (song_id, youtube_id).
+                - 'playlist_items': List of tuples (playlist_id, song_id).
+        """
+        track_ids = []
+        total_tracks = len(tracks)
+        not_found_count = 0
+
+        self._log.info(f"Adding {total_tracks} songs to playlist {playlist_id} on YouTube.")
+
+        new_platform_ids = []
+        playlist_items = []
+
+        for track in tracks:
+            song_id = track.get("song_id")  # Assuming the parent class provides 'song_id'
+            search_results = self.search_track_youtube(track, query_keys)
+            matched_track_id = self.match_results_youtube(track, search_results, match_keys, fuzz_threshold=fuzz_threshold)
+
+            if matched_track_id:
+                track_ids.append(matched_track_id)
+                self._log.info(f"Matched track: {track['title']} by {track['artist']}")
+
+                # Collect new platform ID
+                if song_id:
+                    new_platform_ids.append((song_id, matched_track_id))
+                # Collect playlist-item relationship
+                playlist_items.append((playlist_id, song_id))
+            else:
+                self._log.warning(f"No match found for track: {track['title']} by {track['artist']}")
+                not_found_count += 1
+
+        if not track_ids:
+            self._log.warning("No valid track IDs to add to the playlist.")
+            return {"new_platform_ids": new_platform_ids, "playlist_items": playlist_items}
+
+        for track_id in track_ids:
+            try:
+                self.api.playlistItems().insert(
+                    part="snippet",
+                    body={
+                        "snippet": {
+                            "playlistId": playlist_id,
+                            "resourceId": {
+                                "kind": "youtube#video",
+                                "videoId": track_id,
+                            }
+                        }
+                    }
+                ).execute()
+                self._log.info(f"Added track with ID {track_id} to playlist {playlist_id}.")
+            except Exception as e:
+                self._log.error(f"Failed to add track with ID {track_id} to playlist {playlist_id}: {e}")
+
+        self._log.info(f"Successfully added {len(track_ids)}/{total_tracks} tracks to playlist {playlist_id}.")
+        if not_found_count > 0:
+            self._log.info(f"{not_found_count}/{total_tracks} tracks could not be found.")
+
+        return {"new_platform_ids": new_platform_ids, "playlist_items": playlist_items}
