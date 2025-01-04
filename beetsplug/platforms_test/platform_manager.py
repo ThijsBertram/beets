@@ -152,11 +152,7 @@ class PlatformManager(BeetsPlugin):
         for platform_name, pl in playlists.items():
             if playlist_name != 'all':
                 playlists_to_process[platform_name].extend([p for p in pl if (
-<<<<<<< Updated upstream
-                    (playlist_name.lower() in p['playlist_name'].lower()) &     # filter name
-                    (playlist_type in p['playlist_name']) &                     # filter type
-                    (playlist_name not in plugin.pl_to_skip)                    # filter ignore
-=======
+                    (playlist_name.lower() in p['playlist_name'].lower()) and     # filter name
                     (playlist_type in p['playlist_name']) and                   # filter type
                     (playlist_name not in plugin.pl_to_skip) and                # filter ignore
                     not (' pl ' in p['playlist_name'] and playlist_type == 'mm')  # Additional condition
@@ -167,7 +163,6 @@ class PlatformManager(BeetsPlugin):
                     (playlist_type in p['playlist_name']) and                    # filter type
                     (playlist_name not in plugin.pl_to_skip) and                   # filter ignore
                     not (' pl ' in p['playlist_name'] and playlist_type == 'mm')  # Additional condition
->>>>>>> Stashed changes
                 )])
 
         for platform in VALID_PLATFORMS:
@@ -330,11 +325,7 @@ class PlatformManager(BeetsPlugin):
             q = f'{platform}_id:"{platform_id}"'
             item = self.lib.items(q).get()
             if item:
-<<<<<<< Updated upstream
                 self._log.debug(f"Found item {item} using {platform} id")
-=======
-                # self._log.info(f"{YELLOW_BRIGHT}Found item {RESET}{item} using {platform} id")
->>>>>>> Stashed changes
                 return item
         
         # Check if song exists in db using title and artist
@@ -361,12 +352,8 @@ class PlatformManager(BeetsPlugin):
                 item = items[0]
             except (IndexError, TypeError) as e:
                 item = None
-<<<<<<< Updated upstream
-                self._log.debug(f"Item {song['artist'] - song['title']} not found in db: {e}")
-=======
                 self._log.debug(f"Item not found in db: {e}")
             
             # self._log.info(f"{YELLOW_BRIGHT}Found item {RESET}{item} using song info")
->>>>>>> Stashed changes
             return item
     
