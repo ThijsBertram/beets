@@ -125,6 +125,54 @@ class SongStringParser(BeetsPlugin):
         self.known_artists = self.get_known_artists_from_db()
 
 
+    def commands(self):
+        return [self.custom_gpt_command]
+
+    def extract_info(self, song_string):
+
+        info = self.extract_simple_ss(song_string)
+
+        if not info:
+            info = self.send_gpt_request([song_string])[0][1]
+            info.pop('confidence')
+            info['main_artist'] = info['artists'][0]
+        return info
+    
+    def item_to_string(self, item, ext=None, path=None):
+            
+        artists = item['artists'][0].split(",") ### ?????????????????????????????????
+        feat_artist = item['feat_artist']
+        remixer = item['remixer']
+        remix_type = item['remix_type']
+        main_artist = item['main_artist']
+        # get unique collab_artists
+        special_artists = set([feat_artist]).union(set([remixer])).union(set([main_artist]))
+        collab_artists = list(set(artists) - special_artists)
+        artists = [main_artist] + collab_artists
+        # artist part
+        artist_part = self.concat_artists(artists)
+        if feat_artist:
+            artist_part += f' feat. {feat_artist}'
+        # title part
+        title_part = item['title']
+        if remixer:
+            title_part += f' ({remixer} {remix_type})'
+        # string
+        s = f'{artist_part} - {title_part}'
+
+        # extension
+        if ext:
+            if '.' in ext:
+                s += ext
+            else:
+                s += f'.{ext}'
+        # path
+        if path:
+            s = os.path.join(path, s)
+        
+        return s
+
+
     def get_known_artists_from_db(extract_duos_only=True):
         # Connect to the SQLite database (change the connection method for other databases)
         database_path = str(config['library'])
@@ -169,9 +217,6 @@ class SongStringParser(BeetsPlugin):
         
         return list(known_artists)
 
-    def commands(self):
-        return [self.custom_gpt_command]
-    
     def extract_simple_ss(self, song_string):
 
         forbidden_characters = ['|']
@@ -287,6 +332,7 @@ class SongStringParser(BeetsPlugin):
         
         # Step 5: Process artist part
         def process_artists(artist_string):
+            feat_list = ['feat.', 'ft.', 'featuring', 'feat']
             # Split on commas first, since artists separated by commas should always be split
             artist_list = [a.strip() for a in artist_string.split(',')]
             
@@ -304,6 +350,13 @@ class SongStringParser(BeetsPlugin):
                         # Otherwise, split it on '&' and add both artists separately
                         duo_artists = [a.strip() for a in artist.split('&')]
                         final_artists.extend(duo_artists)
+                elif any(feat in artist.lower() for feat in feat_list):
+                    for feat in feat_list:
+                        if feat in artist.lower():
+                            # Split on 'feat.' and add both artists separately
+                            feat_artists = [a.strip() for a in artist.split(feat)]
+                            final_artists.extend(feat_artists)
+                            break
                 else:
                     # No '&' present, add as is
                     final_artists.append(artist)
@@ -320,7 +373,8 @@ class SongStringParser(BeetsPlugin):
             'title': title,
             'remix_type': remix_type,  # (remix_artist, remix_type) or None
             'remixer': remix_artist,
-            'feat_artist': feature_info if feature_info else ''  # featured_artist or None
+            'feat_artist': feature_info if feature_info else '',  # featured_artist or None,
+            'main_artist': artists[0]
         }
 
     def send_gpt_request(self, args):
@@ -329,10 +383,14 @@ class SongStringParser(BeetsPlugin):
             try:
                 response = self.parser.parse_song_string(song_string)
                 # print(response)
+                        # Remove duplicates based on substrings
                 self._log.info(f'CHATGPT CORRECTLY PARSED Song String: {song_string}\n\n')
                 results.append((song_string, response))
             except Exception as e:
                 self._log.error(f"Error processing song string {song_string}: {e}")
+
+
+
 
         return results
 
@@ -346,33 +404,4 @@ class SongStringParser(BeetsPlugin):
         else:
             return ', '.join(string_list[:-1]) + ' & ' + string_list[-1]
         
-    def string_from_item(self, item, ext=None, path=None):
-        
-        artists = item['artists'][0].split(",") ### ?????????????????????????????????
-        feat_artist = item['feat_artist']
-        remixer = item['remixer']
-        remix_type = item['remix_type']
-        main_artist = item['main_artist']
-        # get unique collab_artists
-        special_artists = set([feat_artist]).union(set([remixer])).union(set([main_artist]))
-        collab_artists = list(set(artists) - special_artists)
-        artists = [main_artist] + collab_artists
-        # artist part
-        artist_part = self.concat_artists(artists)
-        if feat_artist:
-            artist_part += f' feat. {feat_artist}'
-        # title part
-        title_part = item['title']
-        if remixer:
-            title_part += f' ({remixer} {remix_type})'
-        # string
-        s = f'{artist_part} - {title_part}'
-
-        # extension
-        if ext:
-            s += f'.{ext}'
-        # path
-        if path:
-            s = os.path.join(path, s)
-        
-        return s
+    

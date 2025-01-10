@@ -113,9 +113,14 @@ class SoulSeekPlugin(BeetsPlugin):
                 self._log.log("warning", f"No matches found for item: {item['title']}")
                 return {'item': item, 'status': 'no_matches'}
 
-            for match in matches[:3]:
-                file = await self.downloader.download(match['file'], match['username'])
+            for match in matches[:5]:
                 self._log.log("info", f"Download attempt for match: {match['file']['filename']}")
+
+                file = await self.downloader.download(match['file'], match['username'])
+
+                if file['state'] == 'Queued, Remotely' or file['state'] == 'Completed, Errored':
+                    self._log.log("info", f"File queued for download: {file['filename']}")
+                    continue
 
                 if file:
                     moved_path = self._move_downloaded_file(file, item)
@@ -168,7 +173,7 @@ class SoulSeekPlugin(BeetsPlugin):
             if dl_abspath:
                 # CONSTRUCT PATHS
                 src = dl_abspath
-                dst = self.ssp.string_from_item(item, ext=extension, path=self.library_dir)
+                dst = self.ssp.item_to_string(item, ext=extension, path=self.library_dir)
                 rmv = dl_abspath.parent.absolute()
 
                 if os.path.exists(dst):
@@ -213,7 +218,7 @@ class SoulSeekPlugin(BeetsPlugin):
         query = AndQuery([genre_query, path_query])
 
         items = [item for item in lib.items(query)]
-        return items
+        return items[::-1]
 
     def clean_up(self):
         """
