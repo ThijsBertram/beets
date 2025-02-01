@@ -159,7 +159,6 @@ class PlatformManager(BeetsPlugin):
                 )])            
             else:
                 playlists_to_process[platform_name].extend([p for p in pl if (
-                    (playlist_name.lower() in p['playlist_name'].lower()) and    # filter name
                     (playlist_type in p['playlist_name']) and                    # filter type
                     (playlist_name not in plugin.pl_to_skip) and                   # filter ignore
                     not (' pl ' in p['playlist_name'] and playlist_type == 'mm')  # Additional condition
