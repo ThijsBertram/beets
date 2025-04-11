@@ -35,9 +35,9 @@ class Searcher:
         """Initiates a search on Soulseek with exponential backoff and rate limiting."""
         async with self.semaphore:
             try:
-                self._log.log("info", f"Initiating search for query: {query}")
+                self._log.log("debug", f"Initiating search for query: {query}")
                 if query in self.cache:
-                    self._log.log("info", f"Using cached results for query: {query}")
+                    self._log.log("debug", f"Using cached results for query: {query}")
                     return self.cache[query]
 
                 search = await self._enqueue_search(query)
@@ -56,9 +56,9 @@ class Searcher:
     async def search_finished(self, search_id):
         loop = asyncio.get_event_loop()
         try:
-            # self._log.log("info", f"Checking if search ID {search_id} is complete.")
+            # self._log.log("debug", f"Checking if search ID {search_id} is complete.")
             state = await loop.run_in_executor(None, self.search_api.state, search_id)
-            # self._log.log("info", f"Search state for ID {search_id}: {state}")
+            # self._log.log("debug", f"Search state for ID {search_id}: {state}")
             return state.get('isComplete', False)
         except Exception as e:
             self._log.log("error", f"Error checking search state: {e}")
@@ -93,11 +93,11 @@ class Searcher:
                     continue
 
                 if result.get('isLocked'):
-                    self._log.log("warning", f"Skipping locked file: {result['filename']} (user: {username})")
+                    self._log.log("debug", f"Skipping locked file: {result['filename']} (user: {username})")
                     continue
 
                 if not result.get('bitRate') and not result.get('bitDepth'):
-                    self._log.log("warning", f"Skipping file with missing bitrate/bitdepth: {result['filename']} (user: {username})")
+                    self._log.log("debug", f"Skipping file with missing bitrate/bitdepth: {result['filename']} (user: {username})")
                     continue
 
                 filtered.append({
@@ -105,7 +105,7 @@ class Searcher:
                     'file': result
                 })
 
-        self._log.log("info", f"Filtered down to {len(filtered)} results for item: {item['title']}")
+        self._log.log("debug", f"Filtered down to {len(filtered)} results for item: {item['title']}")
         return filtered
 
     def rank_results(self, results, item):
@@ -125,7 +125,7 @@ class Searcher:
                 file_data['bitRate'] = file_data['bitDepth'] * 44  # Approximate conversion
 
         ranked = sorted(results, key=lambda x: x['file'].get('bitRate', 0), reverse=True)
-        self._log.log("info", f"Ranked {len(ranked)} results for item: {item['title']}")
+        self._log.log("debug", f"Ranked {len(ranked)} results for item: {item['title']}")
         return ranked
 
     async def perform_search(self, item):
@@ -134,15 +134,15 @@ class Searcher:
 
         for query in queries:
             try:
-                self._log.log("info", f"Attempting search for query: {query}")
+                self._log.log("debug", f"Attempting search for query: {query}")
                 search_id = await self.search_soulseek(query)
-                # self._log.log("info", f"Search initiated with ID: {search_id}")
+                # self._log.log("debug", f"Search initiated with ID: {search_id}")
                 
                 if search_id:
                     while not await self.search_finished(search_id):
                         time.sleep(1)
                     raw_results = await self.get_search_results(search_id)
-                    self._log.log("info", f"Raw results fetched for query: {query}")
+                    self._log.log("debug", f"Raw results fetched for query: {query}")
 
                     filtered_results = self.filter_results(raw_results, item)
                     ranked_results = self.rank_results(filtered_results, item)
@@ -179,7 +179,7 @@ class Searcher:
         if item.get('feat_artist'):
             matches = [m for m in matches if item['feat_artist'].lower() in m['file']['filename'].lower()]
 
-        self._log.log("info", f"Matched {len(matches)} results for item: {item['title']} after filtering.")
+        self._log.log("debug", f"Matched {len(matches)} results for item: {item['title']} after filtering.")
         return matches
 
     async def get_search_results(self, search_id):

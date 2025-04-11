@@ -12,15 +12,9 @@ COLORS = {
     "RESET": '\033[0m'
 }
 
-# Platform Dictionary
-PLATFORMS = {
-    "SPOTIFY": COLORS["GREEN"],
-    "YOUTUBE": COLORS["RED"],
-    "SOUNDCLOUD": COLORS["ORANGE"]
-}
 
 class CustomLogger:
-    def __init__(self, name, default_color='white', log_file=None):
+    def __init__(self, name, default_color='white', log_file=None, log_level=logging.INFO):
         """
         Initialize the logger with default color and optional file logging.
 
@@ -30,31 +24,34 @@ class CustomLogger:
             log_file (str, optional): Path to a log file. Defaults to None.
         """
         self.logger = logging.getLogger(name)
-        self.logger.setLevel(logging.DEBUG)
+        self.logger.setLevel(log_level)
+        self.logger.propagate = False  # Prevent messages from bubbling up to root logger
 
-        # Set up console handler with color
-        console_handler = logging.StreamHandler()
-        formatter = ColoredFormatter(
-            "%(log_color)s%(asctime)s - %(name)s - [%(levelname)s] - %(message)s",
-            datefmt='%Y-%m-%d %H:%M:%S',
-            log_colors={
-                'DEBUG': 'cyan',
-                'INFO': default_color,
-                'WARNING': 'yellow',
-                'ERROR': 'red',
-                'CRITICAL': 'bold_red',
-            },
-        )
-        console_handler.setFormatter(formatter)
-        self.logger.addHandler(console_handler)
+        # Avoid adding duplicate handlers
+        if not self.logger.handlers:
+            # Set up console handler with color
+            console_handler = logging.StreamHandler()
+            formatter = ColoredFormatter(
+                "%(log_color)s%(asctime)s - %(name)s - [%(levelname)s] - %(message)s",
+                datefmt='%Y-%m-%d %H:%M:%S',
+                log_colors={
+                    'DEBUG': 'cyan',
+                    'INFO': default_color,
+                    'WARNING': 'yellow',
+                    'ERROR': 'red',
+                    'CRITICAL': 'bold_red',
+                },
+            )
+            console_handler.setFormatter(formatter)
+            self.logger.addHandler(console_handler)
 
-        # Optional file handler
-        if log_file:
-            file_handler = logging.FileHandler(log_file)
-            file_handler.setFormatter(logging.Formatter(
-                "%(asctime)s - %(name)s - [%(levelname)s] - %(message)s"
-            ))
-            self.logger.addHandler(file_handler)
+            # Optional file handler
+            if log_file:
+                file_handler = logging.FileHandler(log_file)
+                file_handler.setFormatter(logging.Formatter(
+                    "%(asctime)s - %(name)s - [%(levelname)s] - %(message)s"
+                ))
+                self.logger.addHandler(file_handler)
 
     def log(self, level, message):
         """
@@ -77,6 +74,7 @@ class CustomLogger:
         Returns:
             str: The message with applied colors.
         """
+
         # Highlight items within curly braces
         message = re.sub(r"\{[^{}]+\}", lambda m: f"{COLORS['YELLOW']}{m.group()}{COLORS['RESET']}", message)
 
@@ -92,8 +90,10 @@ class CustomLogger:
         # Highlight warning indicators
         message = re.sub(r"\b(warning|caution)\b", lambda m: f"{COLORS['ORANGE']}{m.group()}{COLORS['RESET']}", message, flags=re.IGNORECASE)
 
-        # Highlight platforms
-        for platform, color in PLATFORMS.items():
-            message = re.sub(fr"\b{platform}\b", lambda m: f"{color}{m.group()}{COLORS['RESET']}", message, flags=re.IGNORECASE)
+        # platforms
+        message = re.sub(r"youtube", lambda m: f"{COLORS['RED']}{m.group()}{COLORS['RESET']}", message)
+        message = re.sub(r"spotify", lambda m: f"{COLORS['GREEN']}{m.group()}{COLORS['RESET']}", message)
+        message = re.sub(r"soundcloud", lambda m: f"{COLORS['ORANGE']}{m.group()}{COLORS['RESET']}", message)
+
 
         return message

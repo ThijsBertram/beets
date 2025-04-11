@@ -568,7 +568,8 @@ class Item(LibModel):
         "youtube_id": types.STRING,
         "last_edited": DateType(),
         "last_edited_ISO": types.STRING,
-        "tags": types.STRING
+        "tags": types.STRING,
+        "rekordbox_colour": types.STRING
     }
 
     _search_fields = (

@@ -1,7 +1,6 @@
 import os
 
 from beetsplug.ssp import SongStringParser
-from beets.dbcore.query import AndQuery, RegexpQuery, OrQuery
 
 
 song_dir = os.path.abspath('D:\SOULSEEK\slskd\src\downloads - kopie')
