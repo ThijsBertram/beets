@@ -1,81 +1,132 @@
 from datetime import datetime
-import os
-import time
+import asyncio
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 class Downloader:
     """
-    A class to handle downloading on Soulseek.
-
-    Attributes:
-    client : SlskdClient
-        The Soulseek client used to perform downloads.
-
-    Methods:
-    download(match)
-        Downloads a matched song.
-    move_file(src, dest)
-        Moves the downloaded file to the designated location.
+    A class to handle downloading on Soulseek, including retry logic and error handling.
     """
 
-    def __init__(self, client, log, timeout):
+    def __init__(self, client, log, semaphore, timeout, max_retries=1):
         self.transfer_api = client.transfers
         self._log = log
+        self.semaphore = semaphore
         self.dl_timeout = timeout
+        self.max_retries = max_retries
 
-    def download(self, match, username):
+    async def download(self, match, username):
+        """
+        Attempts to download a matched file from Soulseek with sequential retry logic.
 
-        timeout = time.perf_counter() + self.dl_timeout
-        """Downloads a matched song."""
+        Args:
+            match (dict): File match information.
+            username (str): The username providing the file.
+
+        Returns:
+            dict or None: Download file metadata if successful, None otherwise.
+        """
+        async with self.semaphore:
+            self._log.log("debug", f"Starting download for {match['filename']}")
+
+            try:
+                file, download_attempted_at = await self._attempt_single_download(match, username)
+
+                if file and file['state'] == 'Completed, Succeeded':
+                    self._log.log("debug", f"Download successful: {match['filename']}")
+                    return file
+                else:
+                    self._log.log("warning", f"Final state after download attempt: {file['state']} for {match['filename']}")
+                    return file
+
+            except Exception as e:
+                self._log.log("error", f"Exception during download: {e}")
+                return {'state': 'Unknown'}
+
+    async def _attempt_single_download(self, match, username):
+        """
+        Attempts a single download and checks its state.
+
+        Args:
+            match (dict): File match information.
+            username (str): The username providing the file.
+
+        Returns:
+            tuple: (file metadata, download attempted timestamp)
+        """
+        timeout = asyncio.get_event_loop().time() + self.dl_timeout
+        download_attempted_at = datetime.now()
+
         try:
-            download_attempted_at = datetime.now()
-            download = self.transfer_api.enqueue(username, [match])    
-            f = match['filename'].split('\\')[-1]
-            self._log.info(f"Download started: {f}")        
+            self._log.log("debug", f"Enqueuing download for {match['filename']}")
+            self.transfer_api.enqueue(username, [match])
+
+            filename = match['filename'].split('\\')[-1]
+            self._log.log("debug", f"Download enqueued: {filename}")
+
             while True:
-                if time.perf_counter() > timeout:
-                    self._log.error(f"Download timeout: {f} after {self.dl_timeout} seconds")
-                    return None, download_attempted_at
-                # status = self.transfer_api.state(download_id)
-                file = self.check_download_state(username=username, f=f)
-                if not file:
-                    time.sleep(1)
-                    continue
-                elif file['state'] == 'Completed, Succeeded':
-                    self._log.info(f"Download complete: {f}")
+                if asyncio.get_event_loop().time() > timeout:
+                    self._log.log("error", f"Download timeout: {filename} after {self.dl_timeout} seconds")
                     return file, download_attempted_at
-                elif file['state'] == 'Queued, Remotely':
-                    self._log.info(f"Download queued remotely: {f}")
-                    return None, download_attempted_at
-                else: 
-                    self._log.error(f"Download failed: {f}")
-                    return None, download_attempted_at
+
+                await asyncio.sleep(2)  # Allow sufficient time for state updates
+
+                file = await self.check_download_state(username, filename)
+                if file and file['state'] == 'Completed, Succeeded':
+                    self._log.log("debug", f"Download completed successfully: {filename}")
+                    return file, download_attempted_at
+
+                if file and file['state'] == 'InProgress':
+                    self._log.log("debug", f"Download in progress for: {filename}")
+                    continue
+
+                if file and file['state'] in ['Queued, Remotely', 'Completed, Errored']:
+                    self._log.log("warning", f"Recoverable state: {file['state']} for {filename}")
+                    return file, download_attempted_at
+
+                self._log.log("error", f"Unexpected state: {file['state']} for {filename}")
+                return {'state': 'Unknown'}, download_attempted_at
+
         except Exception as e:
-            self._log.error(f"Download error: {e}")
-            raise
+            self._log.log("error", f"Exception during download: {e}")
+            return None, download_attempted_at
 
+    async def _delete_queued_download(self, file):
+        """
+        Deletes a download that is in a queued state.
 
-    def check_download_state(self, username, f):
-        # download = self.transfer_api.get(download(self.dl_username, self.dl_file))
-        downloads = self.transfer_api.get_all_downloads()
-        dl_from_username = [download for download in downloads if download['username'] == username]
-
-
-        for dl in dl_from_username:
-
-            file = dl['directories'][0]['files'][0]
-            completed = 1 if file['state'] == 'Completed, Succeeded' else 0
-            fname = file['filename'].split('\\')[-1]
-            username = file['username']
-            # print("DOWNLOAD STAUTS")
-            # print(file['state'])
-            # print(fname)
-            # print(f)
-            # print(fname == f)
-            # print()
-
-            if completed and (fname == f):
-                return file
+        Args:
+            file (dict): The file metadata to delete.
+        """
+        try:
+            if hasattr(self.transfer_api, "remove"):
+                self.transfer_api.remove(file['id'])
+                self._log.log("debug", f"Deleted queued download: {file['filename']}")
             else:
-                return None
-        return
+                self._log.log("error", "The transfer API does not support the 'remove' method.")
+        except Exception as e:
+            self._log.log("warning", f"Failed to delete queued download: {file['filename']}. Error: {e}")
 
+
+    async def check_download_state(self, username, filename):
+        """
+        Checks the state of a download for a specific file and username.
+
+        Args:
+            username (str): The username providing the file.
+            filename (str): The file being downloaded.
+
+        Returns:
+            dict: File metadata containing state and other details.
+        """
+        downloads = await asyncio.get_event_loop().run_in_executor(None, self.transfer_api.get_all_downloads)
+        user_downloads = [dl for dl in downloads if dl['username'] == username]
+
+        for dl in user_downloads:
+            file = dl['directories'][0]['files'][0]
+            fname = file['filename'].split('\\')[-1]
+
+            if fname == filename:
+                return file
+
+        self._log.log("warning", f"File {filename} not found in user downloads.")
+        return {'state': 'Unknown'}

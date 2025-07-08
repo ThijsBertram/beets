@@ -1,277 +1,297 @@
-# Beets
-from beets.plugins import BeetsPlugin
-from beets.library import Library
-from beets.ui import Subcommand
-from beets import config
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from queue import Queue
+from beetsplug.custom_logger import CustomLogger
 from beetsplug.ssp import SongStringParser
 
+# Beets
+from beets.plugins import BeetsPlugin
+from beets.ui import Subcommand
+from beets import config
+from beets.dbcore.query import SubstringQuery, OrQuery, AndQuery, NoneQuery
 
-# Varia'
-import os
-import glob
-import time
-import shutil
-import logging
-import datetime
-
-
-import pathlib
-import threading
-from queue import Queue, Empty
-from datetime import datetime
-
-from slskd_api import SlskdClient
+import asyncio
 from .download import Downloader
 from .search import Searcher
-# from .models import SoulseekModel
-# from dotenv import load_dotenv
+from slskd_api import SlskdClient
 
-
-
+import glob
+from pathlib import Path
+from datetime import datetime, timedelta
+import time
+import os
+import shutil
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 class SoulSeekPlugin(BeetsPlugin):
-    
-    def __init__(self):
+    """
+    Redesigned SoulSeekPlugin to manage tasks and logging with controlled throttling.
 
+    Refactored so the CLI subcommand is a thin wrapper around a core
+    `download_songs()` method that can also be called from other code.
+    """
+
+    def __init__(self):
         super().__init__()
-        self._log = logging.getLogger('beets.soulseek')
+
+        # Initialize the custom logger
+        self._log = CustomLogger("SoulSeekPlugin", default_color="cyan")
+
+        # Configuration setup
+        self.max_threads = int(self.config['max_threads'].get(1))
+        self.dl_timeout = int(self.config['dl_timeout'].get(600))
+        self.download_dir = self.config['slsk_dl_dir'].get()
+        self.library_dir = os.path.abspath(config['directory'].get())
+        self.host = self.config['host'].get()
+        self.api_key = self.config['api_key'].get()
+
+        # Semaphore for rate limiting
+        self.semaphore = asyncio.Semaphore(2)
+
+        # Initialize downloader/searcher/client
+        self.client = SlskdClient(api_key=self.api_key, host=self.host)
+        self.downloader = Downloader(self.client, self._log, self.semaphore, timeout=self.dl_timeout)
+        self.searcher = Searcher(self.client, self._log)
         self.ssp = SongStringParser()
 
-        # CONFIG
-        self.api_key = str(config['mm']['SoulseekPlugin']['api_key'])
-        self.max_threads = int(str(config['mm']['SoulseekPlugin']['max_threads']))
-        self.library_dir = str(config['directory'])
-        self.slsk_dl_dir = str(config['mm']['SoulseekPlugin']['slsk_dl_dir'])
-        self.host = str(config['mm']['SoulseekPlugin']['host'])
-        self.dl_timeout = int(str(config['mm']['SoulseekPlugin']['dl_timeout']))
-
-        # Objects
-        self.slsk = SlskdClient(api_key=self.api_key, host=self.host)
-        self.searcher = Searcher(self.slsk, log=self._log)
-        self.downloader = Downloader(self.slsk, log=self._log, timeout=self.dl_timeout)
+        # Download queue & results
         self.download_queue = Queue()
-        self.threads = list()
-        self.stop_event = threading.Event()
+        self.results = []
 
-        # Central command definitions
-        self.dl_slsk = Subcommand('dl-slsk')
-        self.dl_slsk.parser.add_option('--n-tries', dest='tries', default='3')
-        self.dl_slsk.func = self.dl_slsk
+        # Define the Beets CLI subcommand
+        self.dl_slsk = Subcommand('dl-slsk', help='Download songs from Soulseek.')
+        self.dl_slsk.parser.add_option('--n-tries', dest='tries', default='3',
+                                       help='Number of times to retry a download.')
+        self.dl_slsk.parser.add_option('--genres', dest='genres', default='all',
+                                       help='Comma-separated list of genres or "all".')
+        # CLI entrypoint
+        self.dl_slsk.func = self.cli_download
 
-        # Results
-        self.dls = dict()
+        # Optionally do a cleanup on initialization
+        self.clean_up()
 
     def commands(self):
+        """Register the subcommands this plugin provides."""
         return [self.dl_slsk]
-    
-    def get_songs(self):
-        """Wrapper to start threads and ensure they stop when the queue is empty."""
-        
-        self.clean_slsk()
 
-        # start threads
-        self.stop_event.clear()
-        for _ in range(self.max_threads):
-            t = threading.Thread(target=self.handle_download)
-            t.daemon = True
-            t.start()
-            self.threads.append(t)
+    # ──────────────────────────────────────────────────────────────────────────
+    #  CLI ENTRYPOINT (Thin Wrapper)
+    # ──────────────────────────────────────────────────────────────────────────
+    def cli_download(self, lib, opts, args):
+        """
+        CLI entrypoint for `beet dl-slsk`.
+        - Parses CLI options for n_tries and genres.
+        - Calls the main download logic (async) within `asyncio.run()`.
+        """
+        # Convert CLI opts to Python types
+        n_tries = int(opts.tries)
+        genres = opts.genres
 
-        # Wait for all tasks to be completed
-        self.download_queue.join()
-        # Stops the download threads
-        self.stop_event.set()         
-
-        for _ in range(len(self.threads)):
-            self.download_queue.put(None)
-        for t in self.threads:
-            t.join()
-
-        self.threads.clear()
-
-        """Wrapper to start threads and ensure they stop when the queue is empty."""
-
-        return
-            
-    def get_item(self):
-        item = self.download_queue.get(timeout=1)
-        item_id = item.id
-        self.dls[item.id] = dict()
-        self.dls[item.id]['item'] = item
-        self.dls[item.id]['status'] = 'started'
-        self._log.info(f'\t\t THREAD - {item.id} - STARTED')
-        return item, item_id
-    
-    def get_results(self, item, item_id):
-        results, search_attempted_at = self.searcher.perform_search(item)
-        if not results:
-            self.dls[item_id]['status'] = 'no_results'
-            # self.download_queue.task_done()
-            return False
-        else:
-            self.dls[item_id]['status'] = 'results'
-            n_results = len(results)
-            self.dls[item.id]['n_results'] = n_results
-            return results
-        
-    def get_matches(self, results, item):
-        matches = self.searcher.match_results(results, item)
-        if not matches:
-            self.dls[item.id]['status'] = 'no_matches'
-            # self.download_queue.task_done()
-            return False
-        n_matches = len(matches)
-        self.dls[item.id]['n_mathces'] = n_matches
-
-        return matches
-    
-    def get_download(self, match, item):
-        # match data
-        username, match_data = match
-        # download file
-        file, download_attempted_at = self.downloader.download(match=match_data,
-                                                                username=username)
-        # check 
-        if not file:
-            self.dls[item.id]['status'] = 'dl_failed'
-            return False
-        return file
-
-    def move_dl(self, file, item):
         try:
-            # 5. MOVE FILE
-            # 5.0 process filename stuff - prepare moving 
-            fpath = file['filename']
-            fname = fpath.split('\\')[-1]
-            dl_fstring = glob.glob(f'{self.slsk_dl_dir}/**/*{fname}')  
+            # Run the async method from a sync CLI context
+            asyncio.run(self.download_songs(lib, n_tries, genres))
+        except RuntimeError as e:
+            self._log.log("error", f"Async runtime error occurred: {e}")
 
-            # ugly piece of code - fix this 
-            try:
-                dl_fstring = dl_fstring[0]
-            except IndexError:
-                return False
-            dl_abspath = pathlib.Path(dl_fstring).resolve()
+    # ──────────────────────────────────────────────────────────────────────────
+    #  CALLABLE FROM OTHER CODE (e.g. your pipeline)
+    # ──────────────────────────────────────────────────────────────────────────
+    async def download_songs(self, lib, n_tries=3, genres='all', items=None):
+        """
+        The *core* method to download songs.
+
+        Can be called from:
+          1) The CLI subcommand (via cli_download).
+          2) Your custom pipeline code, e.g.:
+              await plugin.download_songs(lib, 5, 'rock')
+        """
+        # 1. Get the relevant library items (those missing files, matching genres, etc.)
+        if not items:
+            items = self._get_library_items(lib, genres)
+        else:
+            items = [item for item in items if not item.path]
+        self._log.log("info", f"{len(items)} items to download with n_tries={n_tries}, genres={genres}.")
+
+        # 2. Clear previous results
+        self.results = []
+
+        # 3. Process items, respecting the semaphore
+        for item in items:
+            async with self.semaphore:
+                self._log.log("debug", f"Processing item: {item['title']}")
+                # We'll do a backoff search + attempts
+                try:
+                    result = await self._process_task(item, n_tries)
+                    self.results.append(result)
+                    self._log.log("info", f"Task completed for item: {item['title']} -> {result['status']}")
+                except Exception as e:
+                    self._log.log("debug", f"Error occurred for item {item['title']}: {e}")
+
+        return self.results
+    # ──────────────────────────────────────────────────────────────────────────
+    #  INTERNAL LOGIC
+    # ──────────────────────────────────────────────────────────────────────────
+    async def _process_task(self, item, n_tries):
+        """
+        Process a single item:
+         - Search on Soulseek with retries/backoff
+         - Match best results
+         - Attempt to download
+         - Move the downloaded file into the library
+        """
+
+        try:
+
+            # 0. Record the attempt immediately
+            item['last_download_attempt'] = datetime.now().isoformat()
+            item.store()  # commit to DB
+            # 1. Perform search
+            self._log.log("debug", f"Starting search for item: {item['title']}")
+            results = await self._search_with_backoff(item)
+            if not results:
+                self._log.log("debug", f"No search results for item: {item['title']}")
+                return {'item': item, 'status': 'failed: no_results'}
+
+            # 2. Match results to item
+            matches = self.searcher.match_results(results, item)
+            if not matches:
+                self._log.log("debug", f"No matches found for item: {item['title']}")
+                return {'item': item, 'status': 'failed: no_matches'}
+
+            # 3. Attempt downloads on top matches
+            for match in matches[:5]:
+                self._log.log("debug", f"Download attempt for {match['file']['filename']}")
+                file = await self.downloader.download(match['file'], match['username'])
+                if not file:
+                    self._log.log("warning", f"Download returned no file object. Trying next match...")
+                    continue
+
+                # Check if file was queued or errored
+                if file['state'] in ['Queued, Remotely', 'Completed, Errored']:
+                    self._log.log("debug", f"File queued or errored: {file['filename']}, continuing.")
+                    continue
+
+                # If we have a valid downloaded file, move it
+                moved_path = self._move_downloaded_file(file, item)
+                if moved_path:
+                    item['path'] = moved_path
+                    item.store()
+
+                    self._log.log("debug", f"Download & Processing successful for {item['title']}.")
+
+                    return {'item': item, 'status': 'success', 'file': moved_path}
+
+            # If we tried the top matches but all failed
+            return {'item': item, 'status': 'download_failed'}
+
+        except Exception as e:
+            self._log.log("error", f"Error in task for {item['title']}: {e}")
+            return {'item': item, 'status': 'error', 'error': str(e)}
+
+    def _move_downloaded_file(self, file, item):
+        """
+        Moves the downloaded file to the library directory, updates item path.
+        """
+        try:
+            fpath = file['filename']
+            fname = os.path.basename(fpath)
+
+            # 1. Find where the file actually landed (since it's maybe in a temp folder)
+            dl_fstring = glob.glob(
+                f'{self.download_dir}/**/*{glob.escape(fname)}',
+                recursive=True
+            )
+            if not dl_fstring:
+                return None
+            dl_abspath = Path(dl_fstring[0]).resolve()
+
             extension = fname.split('.')[-1]
-            # 5.5 move file
-            # MOVE FILE
             if dl_abspath:
-                # CONSTRUCT PATHS
+                # 2. Construct new path
                 src = dl_abspath
-                dst = self.ssp.string_from_item(item, ext=extension, path=self.library_dir)
+                dst = self.ssp.item_to_string(item, ext=extension, path=self.library_dir)
                 rmv = dl_abspath.parent.absolute()
 
-
+                # 3. Move or remove existing
                 if os.path.exists(dst):
-                    # self._log.info(f"Destination file {dest} already exists. Deleting the source file {src}.")
+                    self._log.log('debug', f"Dest file {dst} already exists. Deleting source {src}.")
                     os.remove(src)
                 else:
                     os.rename(src, dst)
-                                
-                # delete placeholder dir
+
+                # 4. Cleanup
                 shutil.rmtree(rmv)
-
-                self.dls[item.id]['path'] = dst
-                self.dls[item.id]['status'] = 'success'
+                self._log.log('debug', f"File moved to library: {dst}")
                 return dst
-        except:
-            self.dls[item.id]['status'] = 'move_failed'
-            return False
+
+        except Exception as e:
+            self._log.log("error", f"Failed to move file {file['filename']}: {e}")
+
+        return None
+
+    def _get_library_items(self, lib, genres):
+        """
+        Retrieves library items to process. If genres='all', we gather all genres.
+        Otherwise, we split comma-separated genres and query for items lacking a path.
+        """
+        if not genres:
+            genres = 'all'
+        genres_list = genres.split(',') if genres != 'all' else sorted(set(i.genre for i in lib.items()))
+
+        # Build queries
+        genre_queries = [SubstringQuery('genre', g) for g in genres_list]
+        combined_genres = OrQuery(genre_queries)
+        path_query = NoneQuery('path')  # items with no path
+        final_query = AndQuery([combined_genres, path_query])
+
+        items = list(lib.items(final_query))
+        # Maybe reverse them? (As your original code did)
         
-    def handle_download(self):
-        """Handles the download tasks from the queue."""
-        # MAIN LOOP
-        while not self.stop_event.is_set():
-            results = None
-            n_results = None
-            matches = None
-            n_matches = None
-            item = None
-            item_id = None
-            title = None
-            file = None
-            
-            try:
-                # 1. ITEM - taken from queue
-                item, item_id = self.get_item()
-                if not item:
-                    continue
-                # 2. RESULTS for slsk item search
-                results = self.get_results(item, item_id)
-                if not results:
-                    continue
-                # 3. MATCH - results agains the item
-                matches = self.get_matches(results, item)
-                if not matches:
-                    continue
-                # 4. DOWNLOAD - best matches
-                for match in matches[:1]:                   # [:3] REPLACE WITH CONFIG VALUE
-                    file = self.get_download(match, item)
-                    if not file:
+        week_ago = datetime.now() - timedelta(days=7)
+        
+        filtered = []
+        for i in items:
+            # last_download_attempt is stored as a string (ISO8601) in the DB
+            last_download_str = i.get('last_download_attempt', '')
+            if last_download_str:
+                try:
+                    last_download_dt = datetime.fromisoformat(last_download_str)
+                    # If it was more recent than a week ago, skip
+                    if last_download_dt > week_ago:
                         continue
+                except ValueError:
+                    # If the string is malformed, treat it as if no attempt
+                    pass
+            
+            # If we get here, either no last_download_attempt or older than a week
+            filtered.append(i)
 
-                # 5. MOVE - downloaded files
-                    path = self.move_dl(file, item)
-                    if not path:
-                        continue          
-     
-                # 6. ADD PATH - downloaded files
-                    item.path = path
-                    item.store()
+        return filtered[::-1]
 
-                # -
-            except Exception as e:
-                if item:
-                    self._log.error(f"\t\t{item_id} - {self.dls[item.id]['title']} - ERROR - {e}")
-                continue
-            # used for joining queue ( can be prettier )
-            except AttributeError:
-                pass
-            finally:
-                # UGLY UGLY UGLY
-                if not item:
-                    continue
+    def clean_up(self):
+        """
+        Cleans up resources and logs summary results.
+        """
+        self.client.transfers.remove_completed_downloads()
 
-                status = self.dls[item.id]['status']        
-                title = self.dls[item.id]['title']
-                if status == 'no_results':
-                    self._log.info(f'\t\t{item_id} - {title} - X RESOLVED X - no results')
-                elif status == 'no_matches':
-                    self._log.info(f'\t\t{item_id} - {title} - X RESOLVED X - no matches')
-                elif status == 'download_failed':
-                    self._log.info(f'\t\t{item_id} - {title} - X RESOLVED X - dl failed')
-                elif status == 'started':
-                    self._log.info(f'\t\t{item_id} - {title} - X RESOLVED X - not finished')
-                else:
-                    self._log.info(f'\t\t{item_id} - {title} - ! RESOLVED ! - download complete')
-                self.download_queue.task_done()
-
-
-        return
-
-    def add_to_queue(self, item):
-        """Adds a list of songs to the download queue."""
-
-        def queue(song):
-            self.download_queue.put(song)
-
-        if isinstance(item, list):
-            self._log.debug(f'ALL THREADS - {[i.id for i in item]} - {len([item])} TOTAL')
-            for i in item:
-                queue(i)
-                time.sleep(0.1)
-       
-        return
-    
-
-    def clean_slsk(self):
-
-        # slsk - downloads
-        self.slsk.transfers.remove_completed_downloads()
-
-        # slsk - searches
-        searches = self.slsk.searches.get_all()
+        # Delete all searches
+        searches = self.client.searches.get_all()
         for s in searches:
-            self.slsk.searches.delete(s['id'])
+            self.client.searches.delete(s['id'])
 
-        # slsk - dl directory
-        return
+        self._log.log("info", "Cleanup completed. Removed completed downloads and searches.")
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+    async def _search_with_backoff(self, item):
+        """
+        Perform a search with exponential backoff and controlled throttling.
+        """
+        async with self.semaphore:
+            try:
+                self._log.log("debug", f"Initiating search for item: {item['title']}")
+                await asyncio.sleep(2)  # Throttle
+                results = await self.searcher.perform_search(item)
+                self._log.log("debug", f"Search completed for {item['title']}. Results: {len(results)}")
+                return results
+            except Exception as e:
+                self._log.log("debug", f"Search failed for {item['title']}. Error: {e}")
+                raise

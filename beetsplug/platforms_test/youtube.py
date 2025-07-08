@@ -188,7 +188,7 @@ class YoutubePlugin(BeetsPlugin):
 
         if song_exists:
             song_data = SongData(**dict(song_exists)).model_dump()
-            self._pm_log.info(f"{song_data['main_artist']} - {song_data['title']} \033[38;5;220malready exists\033[0m in the library.")
+            self._pm_log.debug(f"{song_data['main_artist']} - {song_data['title']} \033[38;5;220malready exists\033[0m in the library.")
             return song_data
 
         # ELSE USE CHAPPIE OVERLORD

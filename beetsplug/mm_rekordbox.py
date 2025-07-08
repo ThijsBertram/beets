@@ -2,10 +2,67 @@ import os
 import time
 import shutil
 import xml.etree.ElementTree as ET
+import logging
+import re
+from urllib.parse import quote, unquote
+
+from beetsplug.custom_logger import CustomLogger
 from beets.plugins import BeetsPlugin
 from beets.ui import Subcommand
-import logging
+from beets import config
 
+# -----------------------------------------------------------
+# Color and Rating Mapping
+# -----------------------------------------------------------
+
+COLOUR_MAP = {
+    '0x660099': 'RAVE',
+    '0xFF007F': 'EZPARTY',
+    '0x00FF00': 'LOUNGE',
+    '0x0000FF': 'LOOM / TRIPPY',
+    '0x25FDE9': 'COOLDOWN',
+    '0xFFA500': 'Orange',
+    '0xFF0000': 'BEUKEN',
+    '0xFFFF00': 'NODJ'
+}
+
+RATING_RB_TO_FLOAT = {
+    '0': 0.0,
+    '51': 1.0,
+    '102': 2.0,
+    '153': 3.0,
+    '204': 4.0,
+    '255': 5.0
+}
+
+def rating_float_to_rb(rating_float):
+    """Clamp rating_float to [0..5], round to nearest star, map to {0,51,102,153,204,255}."""
+    if rating_float is None:
+        rating_float = 0.0
+    rating_float = max(0.0, min(5.0, rating_float))
+    stars = round(rating_float)  # integer 0..5
+    return str(stars * 51)
+
+# -----------------------------------------------------------
+# Helper function: get primary artist from item
+# -----------------------------------------------------------
+def get_main_artist(item):
+    """
+    If item.artist is non-empty, return it. Otherwise, if item.artists
+    is a list of strings, return the first entry. Otherwise, return "".
+    """
+    # 1) If artist is present, use it
+    if item.artist:  # or: if item.artist and item.artist.strip():
+        return item.artist.strip()
+
+    # 2) If no main artist, check artists
+    # The user might have item.artists as a list of strings
+    many = getattr(item, "artists", None)
+    if isinstance(many, list) and len(many) > 0:
+        # Return the first string in that list
+        return many[0].strip()
+    # If artists is not a list, or is empty, just return ""
+    return ""
 
 
 
@@ -13,13 +70,8 @@ class RekordboxSyncPlugin(BeetsPlugin):
     def __init__(self):
         super().__init__()
 
-        self.beets_db_path = "F:/PROGRAMMING/beets - fork/beets.db"
-        self.audiofiles_path = "D:/Muziek/AUDIOFILES"
-        # Add configuration defaults
+        # Default configuration merged with user config
         self.config.add({
-            'rekordbox_xml_path': 'F:/DJ/Rekordbox/rekordbox.xml',
-            'backup_directory': '~/beets_backups',
-            'filter': None,  # Add a filter/query field in the config
             'conflict_resolution': {
                 'artist': 'beets',
                 'title': 'beets',
@@ -27,467 +79,508 @@ class RekordboxSyncPlugin(BeetsPlugin):
                 'genre': 'beets',
                 'bpm': 'rekordbox',
                 'song_key': 'rekordbox',
+                'tags': 'rekordbox',
+                'colour': 'rekordbox',
+                'rating': 'rekordbox',
                 'default': 'last_modified'
+            },
+            'field_mapping': {
+                'beets_to_rekordbox': {
+                    'artist': 'Artist',
+                    'title': 'Name',
+                    'genre': 'Genre',
+                    'bpm': 'AverageBpm',
+                    'song_key': 'Tonality',
+                    'tags': 'Comments',
+                    'rekordbox_colour': 'Colour',
+                    'rating': 'Rating'
+                },
+                'rekordbox_to_beets': {
+                    'Artist': 'artist',
+                    'Name': 'title',
+                    'Genre': 'genre',
+                    'AverageBpm': 'bpm',
+                    'Tonality': 'song_key',
+                    'Comments': 'tags',
+                    'Colour': 'rekordbox_colour',
+                    'Rating': 'rating'
+                }
             }
         })
 
-        # Initialize logger
-        self.logger = logging.getLogger('rekordbox_sync')
-        handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s'))
-        self.logger.addHandler(handler)
-        self.logger.setLevel(logging.DEBUG)
+        # This determines if we remove KAPOT/VERKEERD tracks
+        self.remove_kapot = False
 
-          # Initialize commands
-        export_playlists_cmd = Subcommand(
-            'export-beets-playlists',
-            help='Export Beets playlists to Rekordbox with optional filtering.'
+        # Paths from config
+        self.xml_path = os.path.abspath(
+            os.path.expanduser(self.config['rekordbox_xml_path'].as_str())
         )
-        export_playlists_cmd.parser.add_option(
-            '-q', '--query', action='store', help='Query to filter tracks'
+        self.backup_dir = os.path.abspath(
+            os.path.expanduser(self.config['backup_directory'].as_str())
         )
-        export_playlists_cmd.func = self.export_beets_playlists
 
-        import_playlists_cmd = Subcommand(
-            'import-rekordbox-playlists',
-            help='Import Rekordbox playlists into Beets with optional filtering.'
-        )
-        import_playlists_cmd.parser.add_option(
-            '-q', '--query', action='store', help='Query to filter tracks'
-        )
-        import_playlists_cmd.func = self.import_rekordbox_playlists
+        # Logger setup
+        self._log = CustomLogger("RekordboxSync", default_color="green")
 
-        sync_metadata_cmd = Subcommand(
-            'sync-metadata',
-            help='Sync metadata between Beets and Rekordbox with conflict resolution.'
+        # CLI command definition
+        self.sync_command = Subcommand('sync-rkbx', aliases=['sr', 'sync-rk', 'sync-rb'])
+        self.sync_command.parser.add_option(
+            '--fields',
+            dest='fields',
+            help="Comma-separated list of fields to sync"
         )
-        sync_metadata_cmd.parser.add_option(
-            '-q', '--query', action='store', help='Query to filter tracks'
+        self.sync_command.parser.add_option(
+            '--rkbx-xml',
+            dest='rkbx_xml',
+            default=self.xml_path,
+            help="Path to Rekordbox XML"
         )
-        sync_metadata_cmd.func = self.sync_metadata
-
-        # Store commands in a custom attcribute to avoid conflict
-        self.subcommands = [export_playlists_cmd, import_playlists_cmd, sync_metadata_cmd]
+        self.sync_command.func = self.cli_sync_rkbx
 
     def commands(self):
-        """Return the list of commands for the plugin."""
-        return self.subcommands
-    # ----------------------- Metadata Sync -----------------------
+        """Register the CLI subcommand(s)."""
+        return [self.sync_command]
 
+    # --------------------------------------------------------------------
+    # CLI ENTRYPOINT (Thin Wrapper)
+    # --------------------------------------------------------------------
+    def cli_sync_rkbx(self, lib, opts, args):
+        """
+        The function that runs when you type:
+            beet sync-rkbx [options]
+        """
+        fields = opts.fields.split(',') if opts.fields else None
+        xml_path_override = opts.rkbx_xml
 
+        # self.remove_kapot could be set based on another CLI option if desired
+        updated_beets, updated_rekordbox, kapot_verkeerd_items = self.sync_rekordbox(
+            lib=lib,
+            fields=fields,
+            xml_path=xml_path_override,
+            remove_kapot=self.remove_kapot
+        )
 
-    def sync_metadata(self, lib, opts, args):
-        """Perform a two-way sync of metadata between Beets and Rekordbox."""
+        # Possibly log or handle the returned items
+        if kapot_verkeerd_items:
+            self._log.log("info",
+                f"{len(kapot_verkeerd_items)} items removed from Rekordbox due to KAPOT/VERKEERD tags"
+            )
+        self._log.log("info", f"Updated {updated_beets} in Beets, {updated_rekordbox} in Rekordbox.")
+        return kapot_verkeerd_items
 
-        def normalize_value(value):
-            """Normalize values for comparison (strip whitespace, lower case, etc.)."""
-            if isinstance(value, str):
-                return value.strip().lower()  # Strip whitespace and convert to lowercase
-            if isinstance(value, (int, float)):
-                return round(float(value), 2)  # Round numerical values to 2 decimal places for consistency
-            return value  # Return other types as-is
-        
-        # Perform backup
+    # --------------------------------------------------------------------
+    # PUBLIC METHOD: PROGRAMMATIC ENTRYPOINT
+    # --------------------------------------------------------------------
+    def sync_rekordbox(self, lib, fields=None, xml_path=None, remove_kapot=False):
+        """
+        Main (programmatic) method to sync between Beets and Rekordbox.
+
+        :param lib: Beets library object
+        :param fields: List of field names to sync (optional)
+        :param xml_path: Path to Rekordbox XML (optional)
+        :param remove_kapot: If True, remove 'KAPOT'/'VERKEERD' tracks from XML
+
+        :return: (updated_beets_count, updated_rekordbox_count, kapot_verkeerd_items_list)
+        """
+        self.remove_kapot = remove_kapot
+
+        # If the caller specified an alternate XML path, use it:
+        if xml_path:
+            self.xml_path = os.path.abspath(os.path.expanduser(xml_path))
+
+        # 1) Backup
         self._perform_backup('sync_metadata')
 
-        # LOAD XML
-        rb_xml_path = os.path.abspath(os.path.expanduser(self.config['rekordbox_xml_path'].as_str()))
+        # 2) Parse XML
         try:
-            tree = ET.parse(rb_xml_path)
+            self._validate_path(self.xml_path)
+            tree = ET.parse(self.xml_path)
             root = tree.getroot()
         except Exception as e:
-            self.logger.error(f"Error reading Rekordbox XML: {e}")
-            return
+            self._log.log("error", f"Error reading Rekordbox XML: {e}")
+            return (0, 0, [])
 
-        # PARSE XML
+        # Build track dictionary
         rb_tracks = self._parse_rekordbox_tracks(root)
-        self.logger.info(f"Found {len(rb_tracks)} tracks in Rekordbox.")
 
-        updated_beets = []
-        updated_rekordbox = []
-        items = [i for i in lib.items()]
+        items = lib.items()
+        updated_beets = 0
+        updated_rekordbox = 0
+        not_found = 0
+        kapot_verkeerd_items = []
 
-        # LOOP OVER ALL BEETS ITEMS
+        # Field mappings from config
+        map_beets2rb = self.config['field_mapping']['beets_to_rekordbox'].get()
+        map_rb2beets = self.config['field_mapping']['rekordbox_to_beets'].get()
+
+        # Restrict fields if specified
+        if fields:
+            map_beets2rb = {k: v for k, v in map_beets2rb.items() if k in fields}
+            map_rb2beets = {k: v for k, v in map_rb2beets.items() if v in fields}
+
         for item in items:
-            print('=========================================================')
             if not item.path:
-                self.logger.warning(f"Skipping item without a valid path: {item}")
+                self._log.log("debug", f"Skipping item without a valid path: {item}")
                 continue
 
-            # PATH STUFF
-            try:
-                full_path = os.path.abspath(item.path.decode('utf-8'))
-                short_path = os.path.basename(item.path.decode('utf-8'))
-                rekordbox_path = short_path.replace(' ', '%20')
-                rekordbox_location = f"file://localhost/D:/Muziek/AUDIOFILES/{rekordbox_path}"
-            except Exception as e:
-                self.logger.warning(f"Error processing path for item: {item}. Error: {e}")
-                quit()
+            full_path, short_path, rekordbox_file, rekordbox_location = self._process_path(item)
+            if not rekordbox_file:
                 continue
-            print(full_path)
-            print(short_path)
-            print(rekordbox_path)
-            print(rekordbox_location)
-            print()
 
-            title_artist = (item.title, item.artist)
-
-            # MATCH REKORDBOX TRACK
-            rb_track = rb_tracks.get(rekordbox_path) or rb_tracks.get(title_artist)
+            rb_track = rb_tracks.get(rekordbox_file.lower())
             if not rb_track:
-                self.logger.debug(f"Track not found in Rekordbox: {rekordbox_path} ({item.title} - {item.artist})")
-                continue
+                # We didn't find this track in Rekordbox => create a new entry
+                self._log.log("debug",
+                    f"Creating a new TRACK in Rekordbox for: {rekordbox_file} ({item.title} - {item.artist})"
+                )
+                new_rb_track = self._create_rekordbox_track(root, item)
+                if new_rb_track is None:
+                    self._log.log("error", f"Failed to create a new TRACK for {item}. Skipping.")
+                    continue
 
-            # LOOP OVER ATTRIBUTES / FIELDS
-            updated_beets = 0
-            updated_rekordbox = 0
+                # Insert into our dictionary so subsequent logic can proceed
+                rb_tracks[rekordbox_file.lower()] = new_rb_track
+                rb_track = new_rb_track
+            else:
+                # If remove_kapot is True, we might remove the existing track
+                if self.remove_kapot:
+                    comments_raw = rb_track.get('Comments', '') or ''
+                    if re.search(r'(KAPOT|VERKEERD)', comments_raw, re.IGNORECASE):
+                        track_elem = root.find(f".//TRACK[@TrackID='{rb_track['TrackID']}']")
+                        collection_elem = root.find(".//COLLECTION")
+                        if track_elem is not None and collection_elem is not None:
+                            collection_elem.remove(track_elem)
+                        kapot_verkeerd_items.append(item)
+                        continue
 
-            for beets_field, rk_field in [('artist', 'Artist'), ('title', 'Name'), ('genre', 'Genre'), ('bpm', 'AverageBpm'), ('song_key', 'Tonality')]:
-                
-                # FIELD VALUES
-                beets_value = getattr(item, beets_field, None)
-                rb_value = rb_track.get(rk_field)
+            # 1) Update Beets from Rekordbox
+            updated_beets += self._update_beets_metadata(item, rb_track, map_rb2beets)
 
-                conflict_resolution = self.config['conflict_resolution']
-                rule = conflict_resolution[beets_field].get() if conflict_resolution[beets_field].exists() else conflict_resolution['default'].get()
-                self.logger.debug(f"Field: {beets_field}, Beets: {beets_value}, Rekordbox: {rb_value}, Rule: {rule}")
+            # 2) Update Rekordbox from Beets
+            updated_rekordbox += self._update_rekordbox_metadata(root, rb_track, item, map_beets2rb)
 
-                if rule == 'beets':
-                    resolved_value = beets_value
-                elif rule == 'rekordbox':
-                    resolved_value = rb_value
-                elif rule == 'last_modified':
-                    resolved_value = rb_value if rb_track.get('LastModified', 0) > item.added else beets_value
-                else:
-                    resolved_value = beets_value
+            # 3) Sync tags (two-way merge) if 'tags' in either map
+            if 'tags' in map_beets2rb or 'tags' in map_rb2beets.values():
+                updated_beets += self._sync_tags(item, rb_track)
+                updated_rekordbox += self._sync_tags(item, rb_track, reverse=True)
 
+        # Write back to disk
+        self._write_rekordbox_xml(self.xml_path, root)
 
-                # DECIDE ON GOLDEN TRUTH
-                resolved_value
+        self._log.log("info", f"Updated metadata for {updated_beets} tracks in Beets.")
+        self._log.log("info", f"Updated metadata for {updated_rekordbox} tracks in Rekordbox.")
+        self._log.log("info", f"Skipped {not_found} tracks not found in Rekordbox (or could not be created).")
 
-                # UPDATE BEETS FIELD
-                if normalize_value(resolved_value) != normalize_value(beets_value):
-                    setattr(item, beets_field, resolved_value)
-                    self.logger.debug(f"Updated BEETS value for {beets_field}: {resolved_value} (normalized: {normalize_value(resolved_value)})")
-                    item.store()
-                    updated_beets += 1
-                # UPDATE REKORDBOX FIELD
-                elif normalize_value(resolved_value) != normalize_value(rb_value):
-                    self.logger.debug(f"Updated REKORDBOX value for {rk_field}: {resolved_value} (normalized: {normalize_value(resolved_value)})")
-                    rb_track[rk_field] = resolved_value
+        return (updated_beets, updated_rekordbox, kapot_verkeerd_items)
 
-                    # Use XPath to find the TRACK with the specified TrackID
-                    track_id = rb_track['TrackID']
-                    track = root.find(f".//TRACK[@TrackID='{track_id}']")  # Replace 123 with your TrackID
-                    if track is not None:
-                        track.set(rk_field, resolved_value)
-                        updated_rekordbox += 1
-                    else:
-                        print(f"TRACK with TrackID {track_id} not found.")
+    # --------------------------------------------------------------------
+    # HELPER: Create a new <TRACK> element if missing
+    # --------------------------------------------------------------------
+    def _create_rekordbox_track(self, root, item):
+        """
+        Create a new <TRACK> element in Rekordbox XML (under <COLLECTION>)
+        for the given Beets item. Returns a new track dict suitable for
+        insertion into rb_tracks, or None if unsuccessful.
 
-                # self.logger.debug(f"Resolved value for {beets_field}: {resolved_value} (normalized: {normalize_value(resolved_value)})")
+        This method also uses get_main_artist(item) to handle fallback
+        from artists if artist is empty.
+        """
+        collection_elem = root.find(".//COLLECTION")
+        if collection_elem is None:
+            self._log.log("error", "No <COLLECTION> element found in Rekordbox XML!")
+            return None
 
+        # Generate a new TrackID
+        new_id = self._get_next_track_id(root)
 
+        # Create the <TRACK> element
+        track_elem = ET.SubElement(collection_elem, "TRACK")
+        track_elem.set("TrackID", str(new_id))
 
-        # Write back Rekordbox updates
-        self._write_rekordbox_xml(rb_xml_path, root)
+        # location is from _process_path
+        full_path, short_path, rekordbox_file, rekordbox_location = self._process_path(item)
 
-        self.logger.info(f"Updated metadata for {updated_beets} tracks in Beets.")
-        self.logger.info(f"Updated metadata for {updated_rekordbox} tracks in Rekordbox.")
+        # Use the fallback logic for Artist
+        primary_artist = get_main_artist(item)
 
+        # Minimal attributes. The rest will be updated by conflict resolution if needed
+        track_elem.set("Location", rekordbox_location or "")
+        track_elem.set("Name", item.title or "")
+        track_elem.set("Artist", primary_artist)
+        track_elem.set("Genre", item.genre or "")
 
+        # Build a dict that matches the structure in _parse_rekordbox_tracks
+        new_rb_track = {
+            'TrackID': str(new_id),
+            'Artist': primary_artist,
+            'Name': item.title or "",
+            'filename': short_path or "",
+            'Location': rekordbox_location or "",
+            'Genre': item.genre or "",
+            'AverageBpm': None,
+            'Tonality': None,
+            'Comments': "",
+            'Colour': "",
+            'Rating': "0"
+        }
+        return new_rb_track
 
-    # def sync_metadata(self, lib, opts, args):
-    #     """Perform a two-way sync of metadata between Beets and Rekordbox."""
-    #     # Perform backup
-    #     self._perform_backup('sync_metadata')
+    def _get_next_track_id(self, root):
+        """
+        Find the largest existing TrackID among <TRACK> elements
+        and return (max_id + 1).
+        """
+        max_id = 0
+        for trk in root.findall(".//TRACK"):
+            tid_str = trk.get("TrackID")
+            if tid_str and tid_str.isdigit():
+                tid = int(tid_str)
+                if tid > max_id:
+                    max_id = tid
+        return max_id + 1
 
-    #     # Load Rekordbox XML
-    #     rb_xml_path = os.path.abspath(os.path.expanduser(self.config['rekordbox_xml_path'].as_str()))
-    #     try:
-    #         tree = ET.parse(rb_xml_path)
-    #         root = tree.getroot()
-    #     except Exception as e:
-    #         self.logger.error(f"Error reading Rekordbox XML: {e}")
-    #         return
+    # --------------------------------------------------------------------
+    # Utility / Setup
+    # --------------------------------------------------------------------
+    def _validate_path(self, path):
+        """Validate the existence of a file path."""
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"The path does not exist: {path}")
 
-    #     rb_tracks = self._parse_rekordbox_tracks(root)
-    #     self.logger.info(f"Found {len(rb_tracks)} tracks in Rekordbox.")
+    def _perform_backup(self, operation):
+        os.makedirs(self.backup_dir, exist_ok=True)
+        timestamp = time.strftime('%Y%m%d_%H%M%S')
+        rb_xml_path = os.path.abspath(os.path.expanduser(self.xml_path))
 
-    #     updated_beets = []
-    #     updated_rekordbox = []
-    #     c_updated = 0
-
-    #     items = [i for i in lib.items()]
-
-    #     for item in items[:10]:
-    #         # Skip items without a valid path
-    #         if not item.path:
-    #             self.logger.warning(f"Skipping item without a valid path: {item}")
-    #             continue
-
-    #         # Match tracks
-    #         try:
-    #             filename = os.path.basename(item.path.decode('utf-8')).replace(' ', '%20')
-    #         except Exception as e:
-    #             self.logger.warning(f"Error processing path for item: {item}. Error: {e}")
-    #             continue
-
-    #         title_artist = (item.title, item.artist)
-    #         rb_track = rb_tracks.get(filename) or rb_tracks.get(title_artist)
-
-    #         if not rb_track:
-    #             self.logger.debug(f"Track not found in Rekordbox: {filename} ({item.title} - {item.artist})")
-    #             continue
-
-    #         updated = False
-    #         for field in ['artist', 'title', 'filename', 'genre', 'bpm', 'song_key']:
-    #             beets_value = getattr(item, field, None)
-    #             rb_value = rb_track.get(field)
-
-    #             # Get conflict resolution rule
-    #             conflict_resolution = self.config['conflict_resolution']
-    #             rule = conflict_resolution[field].get() if conflict_resolution[field].exists() else conflict_resolution['default'].get()
-
-    #             # Apply conflict resolution
-    #             if rule == 'beets':
-    #                 resolved_value = beets_value
-    #             elif rule == 'rekordbox':
-    #                 resolved_value = rb_value
-    #             elif rule == 'last_modified':
-    #                 resolved_value = rb_value if rb_track.get('LastModified', 0) > item.added else beets_value
-    #             else:
-    #                 resolved_value = beets_value
-
-    #             # Normalize values and compare
-    #             if self.normalize_value(resolved_value) != self.normalize_value(beets_value):
-    #                 setattr(item, field, resolved_value)
-    #                 updated = True
-    #             elif self.normalize_value(resolved_value) != self.normalize_value(rb_value):
-    #                 rb_track[field] = resolved_value
-    #                 updated = True
-
-    #         if updated:
-    #             c_updated += 1
-    #             updated_beets.append(item)
-    #             updated_rekordbox.append(rb_track)
-    #             item.store()
-
-    #     # Persist changes to Beets database only if updates are made
-    #     for item in updated_beets:
-    #         item.store()
-
-    #     # Persist changes to Rekordbox XML
-    #     for rb_track in updated_rekordbox:
-    #         for track_elem in root.findall('.//TRACK'):
-    #             if track_elem.get('TrackID') == rb_track['TrackID']:
-    #                 track_elem.set('Artist', rb_track['artist'] or "")
-    #                 track_elem.set('Name', rb_track['title'] or "")
-    #                 track_elem.set('Location', rb_track['filename'] or "")
-    #                 track_elem.set('Genre', rb_track['genre'] or "")
-    #                 track_elem.set('AverageBpm', str(rb_track['bpm']) if rb_track['bpm'] else "")
-    #                 track_elem.set('Tonality', rb_track['song_key'] or "")
-    #                 break
-
-    #     # Write back Rekordbox updates
-    #     self._write_rekordbox_xml(rb_xml_path, root)
-
-    #     self.logger.info(f"Updated metadata for {len(updated_beets)} tracks in Beets.")
-    #     self.logger.info(f"Updated metadata for {len(updated_rekordbox)} tracks in Rekordbox.")
-
-    #     self.logger.info(f"{c_updated} items updated")
-
-    # ----------------------- Playlists Export -----------------------
-
-    def export_beets_playlists(self, lib, opts, args):
-        """Export Beets playlists to Rekordbox XML with filtering."""
-        # Perform backup
-        self._perform_backup('export_playlists')
-
-        # Parse Rekordbox XML or create a new structure
-        rb_xml_path = os.path.abspath(os.path.expanduser(self.config['rekordbox_xml_path'].as_str()))
+        self._validate_path(rb_xml_path)
+        rb_backup_path = os.path.join(
+            self.backup_dir,
+            f"rekordbox_backup_{operation}_{timestamp}.xml"
+        )
         try:
-            tree = ET.parse(rb_xml_path)
-            root = tree.getroot()
+            shutil.copy(rb_xml_path, rb_backup_path)
+            self._log.log("info", f"Backed up Rekordbox XML to {rb_backup_path}")
         except Exception as e:
-            self.logger.warning(f"Error reading Rekordbox XML. Creating new file: {e}")
-            root = ET.Element('DJ_PLAYLISTS')
-            ET.SubElement(root, 'PLAYLISTS')
+            self._log.log("error", f"Failed to back up Rekordbox XML: {e}")
 
-        playlists_root = root.find('PLAYLISTS')
+    def _parse_rekordbox_tracks(self, root):
+        """
+        Returns a dict keyed by lowercased filename -> track dict
+        with fields: TrackID, Artist, Name, Location, Genre, AverageBpm,
+        Tonality, Comments, Colour, Rating, etc.
+        """
+        tracks = {}
+        for track_elem in root.findall('.//TRACK'):
+            track_data = {
+                'TrackID': track_elem.get('TrackID'),
+                'Artist': track_elem.get('Artist'),
+                'Name': track_elem.get('Name'),
+                'filename': os.path.basename(track_elem.get('Location', '')),
+                'Location': track_elem.get('Location', ''),
+                'Genre': track_elem.get('Genre'),
+                'AverageBpm': track_elem.get('AverageBpm'),
+                'Tonality': track_elem.get('Tonality'),
+                'Comments': track_elem.get('Comments'),
+                'Colour': track_elem.get('Colour'),
+                'Rating': track_elem.get('Rating')
+            }
 
-        # Fetch playlists and apply filter
-        filter_query = self.config['filter'].as_str() if self.config['filter'].exists() else None
-        self.logger.info(f"Using filter: {filter_query if filter_query else 'No filter applied'}")
-
-        playlists = lib.get_playlists()  # Assuming `get_playlists()` fetches all playlists
-        for playlist in playlists:
-            # Apply filtering to tracks
-            filtered_tracks = self._filter_tracks(playlist.tracks, filter_query)
-            if not filtered_tracks:
-                self.logger.info(f"Playlist '{playlist.name}' skipped due to filtering.")
+            # Skip if mandatory fields are missing
+            if (not track_data['TrackID'] or
+                not track_data['Name'] or
+                not track_data['Location']):
+                self._log.log("debug",
+                    f"Skipping invalid track with missing fields: {track_data}"
+                )
                 continue
 
-            rb_playlist_name = f"{playlist.name} (From Beets)"
-            rb_playlist = self._find_or_create_playlist(playlists_root, rb_playlist_name)
+            filename_key = track_data['filename']
+            if filename_key:
+                tracks[filename_key.lower()] = track_data
 
-            # Append filtered tracks to Rekordbox playlist
-            for track in filtered_tracks:
-                if not self._track_in_playlist(rb_playlist, track):
-                    track_elem = ET.SubElement(rb_playlist, 'TRACK')
-                    track_elem.set('Name', track.title)
-                    track_elem.set('Artist', track.artist)
-                    track_elem.set('Location', track.path)
-                    self.logger.info(f"Added track '{track.title}' by '{track.artist}' to playlist '{rb_playlist_name}'.")
-
-        # Write updated XML
-        self._write_rekordbox_xml(rb_xml_path, root)
-
-    # ----------------------- Playlists Import -----------------------
-
-    def import_rekordbox_playlists(self, lib, opts, args):
-        """Import Rekordbox playlists into Beets with filtering."""
-        # Perform backup
-        self._perform_backup('import_playlists')
-
-        # Parse Rekordbox XML
-        rb_xml_path = os.path.abspath(os.path.expanduser(self.config['rekordbox_xml_path'].as_str()))
-        try:
-            tree = ET.parse(rb_xml_path)
-            root = tree.getroot()
-        except Exception as e:
-            self.logger.error(f"Error reading Rekordbox XML: {e}")
-            return
-
-        playlists_root = root.find('PLAYLISTS')
-        for rb_playlist in playlists_root.findall('NODE'):
-            rb_playlist_name = rb_playlist.get('Name')
-            tracks = self._get_tracks_from_playlist(rb_playlist)
-
-            # Apply filtering to tracks
-            filter_query = self.config['filter'].as_str() if self.config['filter'].exists() else None
-            filtered_tracks = self._filter_tracks(tracks, filter_query)
-            if not filtered_tracks:
-                self.logger.info(f"Playlist '{rb_playlist_name}' skipped due to filtering.")
-                continue
-
-            # Create or update Beets playlist
-            beets_playlist = lib.get_playlist(rb_playlist_name) or lib.create_playlist(rb_playlist_name, 'rekordbox')
-            for track in filtered_tracks:
-                if not beets_playlist.has_track(track):
-                    beets_playlist.add_track(track)
-                    self.logger.info(f"Added track '{track['title']}' by '{track['artist']}' to Beets playlist '{rb_playlist_name}'.")
-
-    # ----------------------- Helpers and Backups -----------------------
-
-    def _filter_tracks(self, tracks, query):
-        """Filter tracks based on a Beets query."""
-        if not query:
-            return tracks
-        # Simulate filtering logic
-        filtered_tracks = [track for track in tracks if self._track_matches_query(track, query)]
-        return filtered_tracks
-
-    def _track_matches_query(self, track, query):
-        """Check if a track matches a query."""
-        if 'genre:' in query:
-            genre = query.split('genre:')[1].strip()
-            return track.get('genre') == genre
-        if 'bpm:' in query:
-            bpm_range = query.split('bpm:')[1].strip().split('-')
-            if len(bpm_range) == 2:
-                bpm_min, bpm_max = map(int, bpm_range)
-                return bpm_min <= int(track.get('bpm', 0)) <= bpm_max
-        return True
-
-    def _find_or_create_playlist(self, playlists_root, playlist_name):
-        """Find or create a playlist in the Rekordbox XML."""
-        for node in playlists_root.findall('NODE'):
-            if node.get('Name') == playlist_name:
-                return node
-        new_playlist = ET.SubElement(playlists_root, 'NODE', {'Name': playlist_name})
-        return new_playlist
-
-    def _track_in_playlist(self, rb_playlist, track):
-        """Check if a track is already in the Rekordbox playlist."""
-        for rb_track in rb_playlist.findall('TRACK'):
-            if rb_track.get('Location') == track.path:
-                return True
-        return False
-
-    def _get_tracks_from_playlist(self, rb_playlist):
-        """Extract tracks from a Rekordbox playlist."""
-        tracks = []
-        for rb_track in rb_playlist.findall('TRACK'):
-            tracks.append({
-                'title': rb_track.get('Name'),
-                'artist': rb_track.get('Artist'),
-                'path': rb_track.get('Location')
-            })
         return tracks
 
     def _write_rekordbox_xml(self, path, root):
-        """Write the updated Rekordbox XML file."""
-        self.logger.info(f"Attempting to write rekordbox XML to: {path}")
         try:
             tree = ET.ElementTree(root)
             tree.write(path, encoding='UTF-8', xml_declaration=True)
-            self.logger.info(f"Successfully wrote Rekordbox XML to {path}")
+            self._log.log("debug", f"Successfully wrote Rekordbox XML to {path}")
         except Exception as e:
-            self.logger.error(f"Error writing Rekordbox XML: {e}")
+            self._log.log("error", f"Error writing Rekordbox XML: {e}")
 
-    def _perform_backup(self, operation):
-        """Create a backup of Beets and Rekordbox data."""
-        backup_dir = os.path.abspath(os.path.expanduser(self.config['backup_directory'].as_str()))
-        os.makedirs(backup_dir, exist_ok=True)
+    # --------------------------------------------------------------------
+    # Conflict Resolution
+    # --------------------------------------------------------------------
+    def _resolve_conflict(self, beets_value, rb_value, field_name, rb_track, item):
+        """
+        Resolve metadata conflicts based on config.
+        If rating != '0' and colour is non-empty => Rekordbox always wins
+        else follow conflict rules (beets, rekordbox, last_modified).
+        """
+        rb_rating_str = rb_track.get('Rating', '0')
+        rb_colour = rb_track.get('Colour', '')
 
-        timestamp = time.strftime('%Y%m%d_%H%M%S')
-        rb_xml_path = os.path.abspath(os.path.expanduser(self.config['rekordbox_xml_path'].as_str()))
-        beets_db_path = self.beets_db_path  # Default Beets SQLite path
+        if rb_rating_str != '0' and rb_colour:
+            return rb_value
 
-        # Rekordbox backup
-        rb_backup_path = os.path.join(backup_dir, f"rekordbox_backup_{operation}_{timestamp}.xml")
+        conflict_rule = self.config['conflict_resolution'].get().get(field_name, None)
+        if not conflict_rule:
+            conflict_rule = self.config['conflict_resolution']['default'].get(str)
+
+        if conflict_rule == 'beets':
+            return beets_value
+        elif conflict_rule == 'rekordbox':
+            return rb_value
+        elif conflict_rule == 'last_modified':
+            rb_last = rb_track.get('LastModified', 0)
+            beets_last = getattr(item, 'added', 0)
+            return rb_value if rb_last > beets_last else beets_value
+
+        return beets_value
+
+    # --------------------------------------------------------------------
+    # Updating Beets and Rekordbox
+    # --------------------------------------------------------------------
+    def _update_beets_metadata(self, item, rb_track, mapping):
+        """Update Beets metadata fields from Rekordbox track data."""
+        updated = 0
+        for rb_field, beets_field in mapping.items():
+            if beets_field == 'tags':
+                # handled in _sync_tags
+                continue
+
+            rb_value = rb_track.get(rb_field, None)
+            beets_value = getattr(item, beets_field, None)
+
+            # Colour -> item.rekordbox_colour
+            if beets_field == 'rekordbox_colour':
+                if rb_value and rb_value in COLOUR_MAP:
+                    color_str = COLOUR_MAP[rb_value]
+                else:
+                    color_str = ''
+                resolved = self._resolve_conflict(beets_value, color_str, beets_field, rb_track, item)
+                if resolved != beets_value:
+                    setattr(item, beets_field, resolved)
+                    item.store()
+                    updated += 1
+                continue
+
+            # Rating -> item.rating
+            if beets_field == 'rating':
+                rating_float = RATING_RB_TO_FLOAT.get(rb_value, 0.0)
+                resolved = self._resolve_conflict(beets_value, rating_float, beets_field, rb_track, item)
+                if resolved != beets_value:
+                    setattr(item, beets_field, resolved)
+                    item.store()
+                    updated += 1
+                continue
+
+            # Normal fields
+            resolved_value = self._resolve_conflict(beets_value, rb_value, beets_field, rb_track, item)
+            if resolved_value != beets_value and resolved_value is not None:
+                setattr(item, beets_field, resolved_value)
+                item.store()
+                updated += 1
+
+        return updated
+
+    def _update_rekordbox_metadata(self, root, rb_track, item, mapping):
+        """Update Rekordbox XML track data from Beets item fields."""
+        updated = 0
+        track_elem = root.find(f".//TRACK[@TrackID='{rb_track['TrackID']}']")
+        if track_elem is None:
+            return 0
+
+        for beets_field, rb_field in mapping.items():
+            if beets_field == 'tags':
+                # handled in _sync_tags
+                continue
+
+            # -- special fallback for artist
+            if beets_field == 'artist':
+                beets_value = get_main_artist(item)
+            else:
+                beets_value = getattr(item, beets_field, None)
+
+            old_rb_value = rb_track.get(rb_field, None)
+
+            # item.rekordbox_colour -> track.Colour
+            if beets_field == 'rekordbox_colour' and rb_field == 'Colour':
+                hex_found = None
+                for hex_code, color_str in COLOUR_MAP.items():
+                    if color_str == beets_value:
+                        hex_found = hex_code
+                        break
+                new_rb_val = hex_found if hex_found else ''
+                resolved = self._resolve_conflict(new_rb_val, old_rb_value, beets_field, rb_track, item)
+                if resolved != old_rb_value:
+                    track_elem.set('Colour', resolved)
+                    rb_track['Colour'] = resolved
+                    updated += 1
+                continue
+
+            # item.rating -> track.Rating
+            if beets_field == 'rating' and rb_field == 'Rating':
+                new_rb_rating = rating_float_to_rb(beets_value)
+                resolved = self._resolve_conflict(new_rb_rating, old_rb_value, beets_field, rb_track, item)
+                if resolved != old_rb_value:
+                    track_elem.set('Rating', resolved)
+                    rb_track['Rating'] = resolved
+                    updated += 1
+                continue
+
+            # Normal fields
+            resolved_value = self._resolve_conflict(beets_value, old_rb_value, beets_field, rb_track, item)
+            if resolved_value != old_rb_value:
+                track_elem.set(rb_field, resolved_value if resolved_value else '')
+                rb_track[rb_field] = resolved_value
+                updated += 1
+
+        return updated
+
+    def _sync_tags(self, item, rb_track, reverse=False):
+        """
+        Synchronize tags between Beets and Rekordbox "Comments".
+        We unify tags: union of both sides -> apply to both sides.
+        """
+        rb_tags_raw = rb_track.get('Comments', '')
+        rb_tags = [
+            tag.strip()
+            for tag in rb_tags_raw.replace('/*', '').replace('*/', '').split(' / ')
+        ] if rb_tags_raw else []
+
+        beets_tags_raw = item.tags if item.tags else ''
+        beets_tags = [tag.strip() for tag in beets_tags_raw.split(',')] if beets_tags_raw else []
+
+        total_tags = sorted(list(set(rb_tags + beets_tags)))
+        rb_tags_new = '*/ ' + ' / '.join(total_tags) + ' */' if total_tags else ''
+        beets_tags_new = ','.join(total_tags)
+
+        changes = 0
+        if beets_tags_new != item.tags:
+            item.tags = beets_tags_new
+            item.store()
+            changes += 1
+
+        if rb_tags_new != rb_tags_raw:
+            rb_track['Comments'] = rb_tags_new
+            changes += 1
+
+        return changes
+
+    def _process_path(self, item):
+        """Process and normalize the path for an item. Returns (full_path, short_path, rb_file, rb_location)."""
         try:
-            shutil.copy(rb_xml_path, rb_backup_path)
-            self.logger.info(f"Backed up Rekordbox XML to {rb_backup_path}")
+            full_path = os.path.abspath(item.path.decode('utf-8'))
+            short_path = os.path.basename(full_path)
+            # Encode spaces as '%20' so Rekordbox recognizes them
+            rekordbox_file = short_path.replace(' ', '%20')
+
+            # Optionally encode other special characters if needed:
+            #    rekordbox_file = quote(short_path)
+            rekordbox_location = f"file://localhost/D:/Muziek/AUDIOFILES/{rekordbox_file}"
+
+            return full_path, short_path, rekordbox_file, rekordbox_location
         except Exception as e:
-            self.logger.warning(f"Failed to back up Rekordbox XML: {e}")
-
-        # Beets backup
-        beets_backup_path = os.path.join(backup_dir, f"beets_backup_{operation}_{timestamp}.db")
-        try:
-            shutil.copy(beets_db_path, beets_backup_path)
-            self.logger.info(f"Backed up Beets database to {beets_backup_path}")
-        except Exception as e:
-            self.logger.warning(f"Failed to back up Beets database: {e}")
-
-    def _parse_rekordbox_tracks(self, root):
-        """Extract track metadata from Rekordbox XML."""
-        tracks = {}
-        for track_elem in root.findall('.//TRACK'):
-            # Extract track metadata
-            track_data = {
-                'TrackID': track_elem.get('TrackID'),  # Ensure TrackID is included
-                'artist': track_elem.get('Artist'),
-                'title': track_elem.get('Name'),
-                'filename': os.path.basename(track_elem.get('Location', '')),
-                'location': track_elem.get('Location', ''),
-                'genre': track_elem.get('Genre'),
-                'bpm': track_elem.get('AverageBpm'),
-                'song_key': track_elem.get('Tonality'),
-                'LastModified': track_elem.get('ModifiedDate')  # Optional, may not exist
-            }
-
-            # Use filename as the primary key for uniqueness
-            filename_key = track_data['filename']
-            if filename_key:
-                tracks[filename_key] = track_data
-
-            # Use (title, artist) as a secondary key
-            if track_data['title'] and track_data['artist']:
-                tracks[(track_data['title'], track_data['artist'])] = track_data
-
-        self.logger.info(f"Parsed {len(tracks)} tracks from Rekordbox XML.")
-        return tracks
-
-
+            self._log.log("error", f"Error processing path for item: {item}. Error: {e}")
+            return None, None, None, None
