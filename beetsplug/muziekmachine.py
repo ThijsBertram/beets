@@ -76,6 +76,10 @@ class MuziekMachine(BeetsPlugin):
             no_db=False
         )
 
+        print(new_items)
+        
+
+        return
         self._log.log("info", f" STAGE 1 COMPLETED: Pulled {len(new_items)} new items, {len(updated_items)} updated items from platforms: {platform_str}, plalylist: {playlist_str}.")
 
         # Optionally combine them if you want a single list:
