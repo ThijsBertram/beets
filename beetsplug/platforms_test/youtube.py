@@ -167,10 +167,20 @@ class YoutubePlugin(BeetsPlugin):
 
             items.append(track_info)
 
-        tracks = {'items': items}
-        return tracks
+        return items
     
     def _parse_track_item(self, lib, item) -> Dict:
+
+
+        q = f"youtube_id:{item['youtube_id']}"
+        song_exists = lib.items(q).get()
+
+        if song_exists:
+            song_data = SongData(**dict(song_exists))
+        if song_exists:
+            song_data = SongData(**dict(song_exists)).model_dump()
+            self._pm_log.debug(f"{song_data['main_artist']} - {song_data['title']} \033[38;5;220malready exists\033[0m in the library.")
+            return song_data
 
         song_data = dict()
 
@@ -183,14 +193,6 @@ class YoutubePlugin(BeetsPlugin):
         # PARSE USING SIMPLE PARSER
         song_data = self.titleparser.extract_simple_ss(title)
 
-        q = f"youtube_id:{item['youtube_id']}"
-        song_exists = lib.items(q).get()
-
-        if song_exists:
-            song_data = SongData(**dict(song_exists)).model_dump()
-            self._pm_log.debug(f"{song_data['main_artist']} - {song_data['title']} \033[38;5;220malready exists\033[0m in the library.")
-            return song_data
-
         # ELSE USE CHAPPIE OVERLORD
         if not song_data:
             try:
@@ -202,11 +204,6 @@ class YoutubePlugin(BeetsPlugin):
 
         # ARTISTS
         artists = song_data.pop('artists')
-        # if song_data['feat_artist']:
-        #     artists += [song_data['feat_artist']]
-        # if song_data['remixer']:
-        #     artists += song_data['remixer']
-        # remove duplicates and substrings
         if not artists:
             self._pm_log.error("The 'artists' list is empty before deduplication.")
             return dict()
@@ -222,10 +219,71 @@ class YoutubePlugin(BeetsPlugin):
         song_data['artists'] = artists
         song_data['main_artist'] = main_artist
 
-
+        song_data = SongData(**dict(song_data)).model_dump()
 
         return song_data
     
+
+
+    def _create_playlist(self, playlist_name):
+        existing_playlists = self._get_all_playlists()
+
+        playlist_id = next(
+            (p["playlist_id"] for p in existing_playlists if p["playlist_name"].lower() == playlist_name.lower()),
+            None
+        )
+
+        if not playlist_id:
+
+            create_response = self.api.playlists().insert(
+                part="snippet,status",
+                body={
+                    "snippet": {
+                        "title": playlist_name,
+                        "description": ""
+                    },
+                    "status": {
+                        "privacyStatus": "private"
+                    }
+                }
+            ).execute()
+            playlist_id = create_response["id"]
+        
+        return playlist_id
+
+    def _search_song(self, lib, song):
+        query = f"{' '.join(song.artists)} - {song.title}"
+
+        print(song)
+        print(query)
+
+        try:
+            response = self.api.search().list(
+                part="id,snippet",
+                q=query,
+                type="video",
+                maxResults=5
+            ).execute()
+
+            results = response.get("items", [])
+
+            
+            print(results)
+            print()
+            print(results[0])
+
+            print()
+            quit()
+            if not results:
+                return None
+            
+            songs = [self._parse_track_item(lib, result) for result in results]
+
+            return songs
+        except Exception as e:
+            print(f"Error searching YouTube for track: {e}")
+            return None
+
 
 
     def search_track_youtube(self, 

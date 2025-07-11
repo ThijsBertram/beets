@@ -1,6 +1,7 @@
 from beets.plugins import BeetsPlugin
 from contextlib import contextmanager
 from beetsplug.platforms_test.platform import Platform, QUERY_KEYS, MATCH_KEYS
+from beetsplug.models.songdata import SongData
 
 # SF
 import spotipy
@@ -75,23 +76,21 @@ class SpotifyPlugin(BeetsPlugin, Platform):
         return [{'playlist_name': p['name'], 
                  'playlist_id': p['id'],
                  'playlist_description': p['description']} for p in playlists]
-     
-    
-    
-    
-    
-    
-    
-    
+         
+    def _get_playlist_tracks(self, playlist_id):
+        tracks = self.api.playlist_tracks(playlist_id)
+        return tracks['items']
     
     def _parse_track_item(self, lib, item) -> Dict:
         song_data = dict()
         track = item['track']
+
         # title
         title = track['name'].split(' - ')[0]
 
         # ARTISTS
         artists = [artist['name'] for artist in track['artists']]
+
         # main 
         main_artist = artists[0]
         # feat 
@@ -121,49 +120,63 @@ class SpotifyPlugin(BeetsPlugin, Platform):
         song_data['feat_artist'] = feat_artist
         song_data['main_artist'] = main_artist
 
+        song_data = SongData(**dict(song_data)).model_dump()
+
         return song_data
+
+
+
+    def _create_playlist(self, playlist_name):
+        existing_playlists = self._get_all_playlists()
+
+        playlist_id = next(
+            (p["playlist_id"] for p in existing_playlists if p["playlist_name"].lower() == playlist_name.lower()),
+            None
+        )
+
+        # Step 3: Create if not found
+        if not playlist_id:
+            new_playlist = self.api.user_playlist_create(
+                user=self.api.me()['id'],
+                name=playlist_name,
+                public=False,
+                description=""
+            )
+            playlist_id = new_playlist["id"]
+
+        return playlist_id
+
     
-    def _get_playlist_tracks(self, playlist_id):
-        tracks = self.api.playlist_tracks(playlist_id)
-        return tracks
-    
-   
+    def _search_song(self,
+                     lib,
+                     song: SongData) -> List:
+        
+        query = f"track:{SongData.title} artist: {' '.join(SongData.artists)}"
 
-
-
-
-    def search_track(self, 
-                     track: Dict[str, str], 
-                     query_keys: List[str] = QUERY_KEYS) -> List[Dict[str, str]]:
-        """
-        Search for a track on Spotify using metadata. If no matches are found with all query keys,
-        retry with a simplified query using only 'artist' and 'title'.
-
-        Args:
-            track (Dict[str, str]): A dictionary containing track metadata.
-            query_keys (List[str]): A list of keys to use for constructing the query.
-
-        Returns:
-            List[Dict[str, str]]: List of search result items from Spotify API.
-        """
         try:
-            query_parts = [f"{key}:{track[key]}" for key in query_keys if track.get(key)]
-            query = " ".join(query_parts)
+            results = self.sp.search(q=query, type="track", limit=1)
+            results = results.get("tracks", {}).get("items", [])
 
-            # Perform search on Spotify
-            search_results = self.api.search(q=query, type='track', limit=10)
+            if not results:
+                return None
+            
+            songs = [self._parse_track_item(lib, result) for result in results]
 
-            # If no results, retry with simplified query
-            if not search_results['tracks']['items']:
-                self._log.warning("No results found with full query, retrying with simplified query.")
-                query = f"artist:{track['artist']} track:{track['title']}"
-                search_results = self.api.search(q=query, type='track', limit=10)
+            return songs 
 
-            return search_results['tracks']['items']
         except Exception as e:
-            self._log.error(f"Error searching for track with metadata {track}: {e}")
-            return []
+            print(f"Error searching Spotify for track: {e}")
+            return None
+    
+    
+    
+    
 
+
+    
+    
+    
+    
     def match_results(self, 
                       track: Dict[str, str], 
                       search_results: List[Dict[str, str]], 

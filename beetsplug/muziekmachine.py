@@ -65,9 +65,27 @@ class MuziekMachine(BeetsPlugin):
         """Runs the pipeline in stages, chaining results from each stage."""
 
         # ────────────────────────────────────────────────────────
-        # Stage 1: Pull platform data -> returns items
+        # Stage 1.0 : Pull platform data -> returns items
         # ────────────────────────────────────────────────────────
         pm = PlatformManager()
+
+        # NEW PULL FUNCTION FOR SYNCING PLAYLISTS
+        platform_data = pm.pull_data(lib, playlist_name=playlist_str)
+        print(platform_data.keys())
+        print(platform_data['spotify'].keys())
+        print()
+        print()
+        # ────────────────────────────────────────────────────────
+        # Stage 1.1 : Calculate platform differences
+        # ────────────────────────────────────────────────────────
+        diff = pm._platform_diff(lib, platform_data)
+
+        # ────────────────────────────────────────────────────────
+        # Stage 1.2 : Update playlists
+        # ────────────────────────────────────────────────────────
+        pm.update_playlists(lib, diff)
+        return        
+
         new_items, updated_items = pm.pull_platform_songs(
             lib,
             platform_str=platform_str,
@@ -76,10 +94,6 @@ class MuziekMachine(BeetsPlugin):
             no_db=False
         )
 
-        print(new_items)
-        
-
-        return
         self._log.log("info", f" STAGE 1 COMPLETED: Pulled {len(new_items)} new items, {len(updated_items)} updated items from platforms: {platform_str}, plalylist: {playlist_str}.")
 
         # Optionally combine them if you want a single list:
