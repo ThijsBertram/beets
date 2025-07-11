@@ -157,7 +157,7 @@ class PlatformManager(BeetsPlugin):
             for playlist in playlists:
                 with self.platform_dict[platform]() as plugin:
                     tracks = plugin._get_playlist_tracks(playlist['playlist_id'])
-                    playlist_tracks = [plugin._parse_track_item(lib, track) | playlist for track in tracks]   
+                    playlist_tracks = [plugin._parse_song_item(lib, track | playlist) for track in tracks]   
                     data[platform][playlist['playlist_name']] = playlist_tracks
                 break    
 
@@ -189,7 +189,7 @@ class PlatformManager(BeetsPlugin):
                 if playlist not in data[pf].keys():
                     track_set[pf] = set()
                 else:
-                    song_models = [SongData(**song) for song in data[pf][playlist]]
+                    song_models = [song for song in data[pf][playlist]]
                     # song_tuples = [(tuple(song['artists']), song['title']) for song in song_models]
                     track_set[pf] = set(song_models)
                     
@@ -203,167 +203,56 @@ class PlatformManager(BeetsPlugin):
             playlist_diffs[playlist] = missing
 
         return playlist_diffs
-
-    def pull_platform_songs(
-        self,
-        lib,
-        platform_str='all',
-        playlist_name='all',
-        playlist_type='mm',
-        no_db=False
-    ):
-        """
-        Core logic to pull song data from the specified platform(s) and add/update
-        the Beets library.
-
-        It can be called from:
-          1) The CLI subcommand (via `cli_pull_platform`).
-          2) Another Python script, e.g.:
-             `PlatformManager().pull_platform_songs(lib, 'spotify', 'all', 'mm', no_db=False)`
-        """
-        new = []
-        existing = []
-
-
-        # 1.2 Get all playlists from each platform
-        all_playlists = {pf: [] for pf in VALID_PLATFORMS}
-        for name, pf_plugin_cls in self.platform_dict.items():
-            with pf_plugin_cls() as plugin:
-                all_playlists[name].extend(plugin._get_all_playlists())
-
-
-        # 1.3 Filter playlists based on the playlist name, type, etc.
-        #     We'll store them in a dict: {platform_name: [playlists_to_process]}
-        playlists_to_process = {pf: [] for pf in VALID_PLATFORMS}
-        for pf_name, pl_list in all_playlists.items():
-            if not pl_list:
-                continue
-
-            # We'll need to open the plugin instance again to check `plugin.pl_to_skip`, etc.
-            pf_plugin_cls = self.platform_dict.get(pf_name)
-            if not pf_plugin_cls:
-                continue
-
-            with pf_plugin_cls() as plugin:
-
-                # PLAYLIST INCLUSION LOGIC
-                def should_include(playlist, to_exclude, playlist_name, playlist_type):
-                    """Return True if a given playlist should be included."""
-
-                    pl_to_select = [pl.lower() for pl in playlist_name.split(',')]
-
-                    if playlist_type.lower() not in playlist['playlist_name'].lower():
-                        return False
-
-                    # 1. PL TO SKIP CONFIG
-                    if playlist_name.lower() in to_exclude.lower():
-                        return False
-
-                    # 2) Special case: if ' pl ' in p['playlist_name'] AND playlist_type == 'mm', skip
-                    if ' pl ' in playlist['playlist_name'] and playlist_type == 'mm':
-                        return False
-
-                    if playlist_name == 'all':
-                        return True
-                    else:
-                        if any(pl in playlist['playlist_name'].lower() for pl in pl_to_select):
-                            return True
-                        else:
-                            return False
-
-                selected = [p for p in pl_list if should_include(p, 
-                                                                 to_exclude=plugin.pl_to_skip, 
-                                                                 playlist_name=playlist_name, 
-                                                                 playlist_type=playlist_type)]   
-
-                playlists_to_process[pf_name].extend(selected)    
-
-        # Logging how many playlists per platform
-        for pf in VALID_PLATFORMS:
-            num_pl = len(playlists_to_process[pf])
-            color = PLATFORM_LOG_COLOR.get(pf, '')
-            self._log.log("info",f"{num_pl} playlists to process for {pf}")
-
-        # 2. Retrieve songs for each platform and optionally add to DB
-        for pf_name, playlists in playlists_to_process.items():
-            if not playlists:
-                continue
-
-            pf_plugin_cls = self.platform_dict.get(pf_name)
-            if not pf_plugin_cls:
-                continue
-
-            with pf_plugin_cls() as plugin:
-                for pl in playlists:
-                    # 2.1 get raw tracks
-                    tracks = plugin._get_playlist_tracks(pl['playlist_id'])
-
-                    # 2.2 parse raw tracks
-                    parsed_tracks = [
-                        plugin._parse_track_item(lib, item)
-                        for item in tracks
-                    ]
-
-                    # 2.3 add playlist & genre info
-                    song_data = []
-                    for track in parsed_tracks:
-                        if not track:
-                            continue
-                        try:
-                            track['platform'] = pf_name
-                            track['playlist_name'] = pl['playlist_name']
-                            track['playlist_id'] = pl['playlist_id']
-                            track['playlist_description'] = pl['playlist_description']
-                            if playlist_type == 'mm':
-                                split_name = pl['playlist_name'].split(' - ')
-                                track['genre'] = split_name[1] if len(split_name) > 1 else ''
-                                track['subgenre'] = split_name[2] if len(split_name) > 2 else ''
-                            song_data.append(SongData(**track).model_dump())
-                        except Exception as e:
-                            self._log.error(f"Error adding playlist info to track: {e}")
-
-                    # Logging
-                    self._log.log("info",
-                        f"{len(parsed_tracks)} songs found in "
-                        f"{pl['playlist_name']} on {pf_name}"
-                    )
-
-                    # 2.4 If `no_db` is False, add/update songs in DB
-                    if not no_db:
-                        n, e = self.add_to_db(lib, song_data)
-                        new.extend(n)
-                        existing.extend(e)
-                        self._log.log("info",f"{len(new)}/{len(new) + len(existing)} new songs added")
-        
-        return new, existing
-
-   
+  
     def update_playlists(self, lib, diff):
         
-
-        for playlist_name, sets in diff.items():
-            
-            
+        for playlist_name, sets in diff.items(): 
             for platform, platform_plugin in self.platform_dict.items():
                 # 1. Make sure playlist exists
                 with platform_plugin() as plugin:
-                    plugin._create_playlist(playlist_name)
-
-                    # 2. add songs to playlist
+                    playlist_id = plugin._create_playlist(playlist_name)
+                    # 2. Loop over songs
                     songs = sets[platform]
 
                     for song in songs:
+                        # 2.1 search song and parse result
                         search_results = plugin._search_song(lib, song)
-                        print(search_results)
-                        # match = platform_plugin._match_results(song, search_results)
-                 
+                        parsed_results = plugin._parse_search_results(lib, search_results)
+                        # 2.2 match result against song
+                        song_match = None
+                        for result in parsed_results:
+                            if result == song:
+                                song_match = result
+                                break
+                        # 2.3 no match: UNABLE TO ADD
+                        if not song_match:
+                            print( "NO MATCH IN RESULTS")
+                        
+                        # 3. add song to playlist
+                        plugin._add_song_to_playlist(song_match, playlist_id)
+
+                        # 4. Update beets database entry
+                        def sync_models(primary: SongData, 
+                                        secondary: SongData) -> SongData:
+                            p = primary.model_dump()
+                            s = secondary.model_dump()
+                            merged = {
+                                key: p[key] if p[key] not in [None, '', [], {}, 0] else s.get(key)
+                                for key in p
+                            }
+
+                            return SongData(**merged)
+
+                        # 4.1 Update Items table
+                        updated_song = sync_models(song_match, song)
+                        self._update_song(lib, updated_song)
+
+                        # 4.2 Update Playlist table
+                        self._update_playlist(lib, )
 
         return
    
    
-    # ──────────────────────────────────────────────────────────────────────────
-    # SUPPORTING METHODS
-    # ──────────────────────────────────────────────────────────────────────────
     def _get_plugin(self, platform):
         """Return the appropriate plugin class based on the platform."""
         if platform == 'spotify':
@@ -373,17 +262,16 @@ class PlatformManager(BeetsPlugin):
         else:
             raise ValueError(f"Unsupported platform: {platform}")
 
-    def add_to_db(self, lib, song_data):
-        """
-        Add or update the song_data in the beets library DB.
-        
-        Returns:
-            (list_of_new_items, list_of_existing_items)
-        """
-        exists = []
-        new = []
+    def _update_song(self, lib, song: SongData):
+            """
+            Add or update the song_data in the beets library DB.
+            
+            Returns:
+                (list_of_new_items, list_of_existing_items)
+            """
 
-        for song in song_data:
+            song = song.model_dump()
+
             # Reformat artists
             artists = ','.join(sorted(set(song.pop('artists'))))
             song['artists'] = artists
@@ -403,11 +291,9 @@ class PlatformManager(BeetsPlugin):
             # Re-fetch to get an updated item (if new, it now exists)
             item = self._get_item_if_exists(lib, song)
             if is_new and item:
-                new.append(item)
+                return True
             elif not is_new and item:
-                exists.append(item)
-
-        return new, exists
+                return False
 
     def _gen_store_item_q(self, update_data, table_name='items', row_id=None, is_new_row=False):
         """
@@ -488,3 +374,44 @@ class PlatformManager(BeetsPlugin):
 
 
 
+
+
+    def add_to_db(self, lib, songs: List[SongData]):
+            """
+            Add or update the song_data in the beets library DB.
+            
+            Returns:
+                (list_of_new_items, list_of_existing_items)
+            """
+            exists = []
+            new = []
+
+
+            for song in songs:
+                
+                song = song.model_dump()
+                
+                # Reformat artists
+                artists = ','.join(sorted(set(song.pop('artists'))))
+                song['artists'] = artists
+
+                item = self._get_item_if_exists(lib, song)
+                is_new = (item is None)
+                row_id = None if is_new else item.id
+
+                if is_new:
+                    song['added'] = datetime.datetime.now().timestamp()
+
+                query, subvals = self._gen_store_item_q(song, row_id=row_id, is_new_row=is_new)
+                if query:
+                    with lib.transaction() as tx:
+                        tx.mutate(query, subvals)
+
+                # Re-fetch to get an updated item (if new, it now exists)
+                item = self._get_item_if_exists(lib, song)
+                if is_new and item:
+                    new.append(item)
+                elif not is_new and item:
+                    exists.append(item)
+
+            return new, exists

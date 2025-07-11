@@ -71,20 +71,23 @@ class MuziekMachine(BeetsPlugin):
 
         # NEW PULL FUNCTION FOR SYNCING PLAYLISTS
         platform_data = pm.pull_data(lib, playlist_name=playlist_str)
-        print(platform_data.keys())
-        print(platform_data['spotify'].keys())
-        print()
-        print()
+
         # ────────────────────────────────────────────────────────
         # Stage 1.1 : Calculate platform differences
         # ────────────────────────────────────────────────────────
         diff = pm._platform_diff(lib, platform_data)
-
         # ────────────────────────────────────────────────────────
         # Stage 1.2 : Update playlists
         # ────────────────────────────────────────────────────────
         pm.update_playlists(lib, diff)
         return        
+
+
+
+
+
+
+
 
         new_items, updated_items = pm.pull_platform_songs(
             lib,

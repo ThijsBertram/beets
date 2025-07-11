@@ -3,6 +3,17 @@ from typing import List, Optional, Tuple
 from beets.library import DateType
 import datetime
 
+class PlaylistData(BaseModel):
+    namme: str
+    description: str = ''
+    spotify_id: str = ''
+    youtube_id: str = ''
+    soundcloud_id: str = ''
+    path: str = ''
+    last_edited_at = ''
+    type = ''
+    
+
 class SongData(BaseModel):
     title: str
     main_artist: str
