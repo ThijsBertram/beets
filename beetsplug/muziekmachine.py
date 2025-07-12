@@ -13,6 +13,13 @@ from beetsplug.platforms_test.platform_manager import PlatformManager
 from beetsplug.custom_logger import CustomLogger
 from beetsplug.mm_rekordbox import RekordboxSyncPlugin
 
+
+# TO DO
+# - change 'sync' from string argument to just a boolean flag (sync of --sync present else not)
+# - add logging for sync platform
+# - 
+
+
 class MuziekMachine(BeetsPlugin):
     def __init__(self):
         super().__init__()
@@ -23,11 +30,22 @@ class MuziekMachine(BeetsPlugin):
             'mm-run',
             help='Run custom pipeline: pull platforms -> download songs'
         )
+        # sync playlists
+        self.pipeline_cmd.parser.add_option(
+            '--sync', default=''
+        )
+
+
+
+
+
         # platform
         self.pipeline_cmd.parser.add_option(
             '--platform', default='all',
             help='Which platform to pull from (all, spotify, youtube, etc.)'
         )
+
+
         # playlist name
         self.pipeline_cmd.parser.add_option(
             '--playlist', default='all',
@@ -56,16 +74,18 @@ class MuziekMachine(BeetsPlugin):
         playlist_str = opts.playlist
         # dl
         dl = opts.dl
+        # sync playlists
+        sync = opts.sync
 
         self._log.log("info", "Starting pipeline...")
-        self.run_pipeline(lib, platform_str, playlist_str, dl)
+        self.run_pipeline(lib, platform_str, playlist_str, dl, sync)
         self._log.log("info", "Pipeline completed.")
 
-    def run_pipeline(self, lib, platform_str, playlist_str, dl):
+    def run_pipeline(self, lib, platform_str, playlist_str, dl, sync):
         """Runs the pipeline in stages, chaining results from each stage."""
 
         # ────────────────────────────────────────────────────────
-        # Stage 1.0 : Pull platform data -> returns items
+        # Stage 0.0 : Pull platform data -> returns items
         # ────────────────────────────────────────────────────────
         pm = PlatformManager()
 
@@ -73,13 +93,17 @@ class MuziekMachine(BeetsPlugin):
         platform_data = pm.pull_data(lib, playlist_name=playlist_str)
 
         # ────────────────────────────────────────────────────────
-        # Stage 1.1 : Calculate platform differences
+        # Stage 1 : Sync playlists 
         # ────────────────────────────────────────────────────────
-        diff = pm._platform_diff(lib, platform_data)
-        # ────────────────────────────────────────────────────────
-        # Stage 1.2 : Update playlists
-        # ────────────────────────────────────────────────────────
-        pm.update_playlists(lib, diff)
+        if sync:
+            # 1.1 Calculate platform differences
+            diff, total = pm._platform_diff(lib, platform_data)
+            # 1.2 : Update playlists
+            pm.sync_playlists(lib, diff, total)
+            # ────────────────────────────────────────────────────────
+
+
+
         return        
 
 

@@ -2,7 +2,7 @@ from beets.plugins import BeetsPlugin
 from contextlib import contextmanager
 from beetsplug.platforms_test.platform import Platform, QUERY_KEYS, MATCH_KEYS
 from beetsplug.models.songdata import SongData
-
+import urllib.parse
 # SF
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
@@ -81,9 +81,10 @@ class SpotifyPlugin(BeetsPlugin, Platform):
         tracks = self.api.playlist_tracks(playlist_id)
         return tracks['items']
     
-    def _parse_song_item(self, lib, item) -> Dict:
+    def _parse_song_item(self, lib, track, search_results=False) -> Dict:
         song_data = dict()
-        track = item['track']
+        if not search_results:
+            track = track['track']
 
         # title
         title = track['name'].split(' - ')[0]
@@ -107,7 +108,6 @@ class SpotifyPlugin(BeetsPlugin, Platform):
         artists = [a for a in artists if a not in substrings]
         # sort
         artists = sorted(artists)
-            
         # Filter out strings that are substrings of any other string
         # spotify id
         spotify_id = track['id']
@@ -119,9 +119,7 @@ class SpotifyPlugin(BeetsPlugin, Platform):
         song_data['spotify_id'] = spotify_id
         song_data['feat_artist'] = feat_artist
         song_data['main_artist'] = main_artist
-
         song_data = SongData(**dict(song_data))
-
         return song_data
 
 
@@ -136,6 +134,7 @@ class SpotifyPlugin(BeetsPlugin, Platform):
 
         # Step 3: Create if not found
         if not playlist_id:
+            self._log('debug', f'PLAYLIST {playlist_name} created (did not exist yet)')
             new_playlist = self.api.user_playlist_create(
                 user=self.api.me()['id'],
                 name=playlist_name,
@@ -151,31 +150,29 @@ class SpotifyPlugin(BeetsPlugin, Platform):
                      lib,
                      song: SongData) -> List:
         
-        query = f"track:{SongData.title} artist: {' '.join(SongData.artists)}"
+        query = f"track:'{song.title}' artist:'{' '.join(song.artists)}'"
 
         try:
-            results = self.sp.search(q=query, type="track", limit=1)
-            results = results.get("tracks", {}).get("items", [])
+            
+            results = self.api.search(q=query, type="track", limit=5, market="US", offset=0)['tracks']['items']
+            results = [dict(result) for result in results]
 
             if not results:
                 return None
             
-            songs = [self._parse_song_item(lib, result) for result in results]
-
-            return songs 
+            return results 
 
         except Exception as e:
-            print(f"Error searching Spotify for track: {e}")
+            self._log.log("error", f"Error searching Spotify for track: {e}")
             return None
     
     
-    
-    def _parse_search_results(self, lib, search_results):
-        
-        return
+    def _parse_search_results(self, lib, results):
+        songs = [self._parse_song_item(lib, result, search_results=True) for result in results]
+
+        return songs
 
 
-    
     
     
     

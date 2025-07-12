@@ -116,7 +116,7 @@ class YoutubePlugin(BeetsPlugin):
         request = self.api.playlists().list(
             part='id,snippet,contentDetails',
             mine=True,
-            maxResults=50
+            maxResults=100
         )
 
         while request:
@@ -125,7 +125,7 @@ class YoutubePlugin(BeetsPlugin):
                 playlists.extend(response['items'])
                 request = self.api.playlists().list_next(request, response)
             except HttpError as e:
-                print(f"An HTTP error {e.resp.status} occurred: {e.content}")
+                self._log.debug( f"An HTTP error {e.resp.status} occurred: {e.content}")
                 break
         
         playlists = [{'playlist_id': playlist['id'],
@@ -149,7 +149,7 @@ class YoutubePlugin(BeetsPlugin):
                 videos.extend(response['items'])
                 request = self.api.playlistItems().list_next(request, response)
             except HttpError as e:
-                print(f"An HTTP error {e.resp.status} occurred: {e.content}")
+                self._log.debug(f"An HTTP error {e.resp.status} occurred: {e.content}")
                 break
 
         items = []
@@ -168,8 +168,7 @@ class YoutubePlugin(BeetsPlugin):
             items.append(track_info)
 
         return items
-    
-    
+      
     def _parse_song_item(self, lib, song) -> SongData:
 
         q = f"youtube_id:{song['youtube_id']}"
@@ -196,8 +195,11 @@ class YoutubePlugin(BeetsPlugin):
         # ELSE USE CHAPPIE OVERLORD
         if not song_data:
             try:
-                title, song_data = self.titleparser.send_gpt_request(args=[title])[0]
-                song_data.pop('confidence')
+                title, song_data = self.titleparser.send_gpt_request(lib, args=[title])[0]
+                try:
+                    song_data.pop('confidence')
+                except KeyError:
+                    pass
             except IndexError as e:
                 self._log.error(f"ERROR parsing {title}: {e}")
                 return song_data
@@ -205,7 +207,7 @@ class YoutubePlugin(BeetsPlugin):
         # ARTISTS
         artists = song_data.pop('artists')
         if not artists:
-            self._pm_log.error("The 'artists' list is empty before deduplication.")
+            self._log.log("debug", "The 'artists' list is empty before deduplication.")
             return dict()
         # Remove duplicates based on substrings
         substrings = {a for a in artists for other in artists if a != other and a in other}
@@ -232,7 +234,8 @@ class YoutubePlugin(BeetsPlugin):
         )
 
         if not playlist_id:
-
+            self._log.debug(f'PLAYLIST {playlist_name} created (did not exist yet)')
+            
             create_response = self.api.playlists().insert(
                 part="snippet,status",
                 body={
@@ -282,7 +285,7 @@ class YoutubePlugin(BeetsPlugin):
 
             return results
         except Exception as e:
-            print(f"Error searching YouTube for track: {e}")
+            self._log.debug(f"Error searching YouTube for track: {e}")
             return None
 
     def _add_song_to_playlist(self, song, playlist_id):
@@ -302,7 +305,7 @@ class YoutubePlugin(BeetsPlugin):
                 }            
             ).execute()
         except Exception as e:
-            print("UNABLE TO ADD DUE TO: ", e)
+            self._log.log("error", "UNABLE TO ADD DUE TO: ", e)
             return False
         return True
     

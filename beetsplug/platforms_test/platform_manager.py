@@ -5,7 +5,7 @@ from beetsplug.platforms_test.youtube import youtube_plugin
 from beetsplug.platforms_test.spotify import spotify_plugin
 from beetsplug.platforms_test.platform import VALID_PLATFORMS, VALID_PLAYLIST_TYPES
 from beetsplug.custom_logger import CustomLogger
-from beetsplug.models.songdata import SongData
+from beetsplug.models.songdata import SongData, PlaylistData
 from beets.library import Item, DateType
 from beets.dbcore.query import AndQuery, RegexpQuery, OrQuery
 
@@ -13,6 +13,7 @@ from beets.dbcore.query import AndQuery, RegexpQuery, OrQuery
 # Varia
 import re
 import sqlite3
+import time
 import logging
 import colorlog
 import datetime
@@ -115,6 +116,10 @@ class PlatformManager(BeetsPlugin):
 
         self.pull_platform_songs(lib, platform_str, playlist_name, playlist_type, no_db)
 
+    
+    # ──────────────────────────────────────────────────────────────────────────
+    # PULL DATA
+    # ──────────────────────────────────────────────────────────────────────────    
     def pull_data(
             self,
             lib,
@@ -166,7 +171,8 @@ class PlatformManager(BeetsPlugin):
     def _platform_diff(
             self,
             lib,
-            data
+            data,
+            
     ):
 
 
@@ -178,6 +184,7 @@ class PlatformManager(BeetsPlugin):
 
         playlist_names = collect_all_names(data)
         playlist_diffs = dict()
+        playlist_total = dict()
 
         for playlist in playlist_names:
             track_set = dict()
@@ -196,37 +203,69 @@ class PlatformManager(BeetsPlugin):
             
             # calculate TOTAL set
             track_set['total'] = set(chain.from_iterable([track_set[pf] for pf in data.keys()]))
+            playlist_total[playlist] = track_set['total']
+
             # calculate MISSING set per platform
             for pf in data.keys():
                 missing[pf] = track_set['total'].difference(track_set[pf])
             
             playlist_diffs[playlist] = missing
 
-        return playlist_diffs
+        return playlist_diffs, playlist_total
   
-    def update_playlists(self, lib, diff):
+    
+    # ──────────────────────────────────────────────────────────────────────────
+    # PLAYLISTS
+    # ──────────────────────────────────────────────────────────────────────────
+    def sync_playlists(self, lib, diff, total):
         
+        playlist_ids = dict()
+
         for playlist_name, sets in diff.items(): 
+            self._log.log("info", f"STARTING SYNC: {playlist_name}")
+            # print(total[playlist_name])
+            total_tracks = total[playlist_name]
+            # print(len(total_tracks))
+            self._log.log("info", f"TOTAL TRACKS : {len(total_tracks)}")
+            songs_not_found = 0
+
             for platform, platform_plugin in self.platform_dict.items():
+
+                
+                
+
                 # 1. Make sure playlist exists
                 with platform_plugin() as plugin:
                     playlist_id = plugin._create_playlist(playlist_name)
+                    playlist_ids[f'{platform}'] = playlist_id
+
+                    self._log.log("info", f"{len(sets[platform])} songs MISSING in playlist {playlist_name} on {platform}")
+
                     # 2. Loop over songs
                     songs = sets[platform]
 
                     for song in songs:
                         # 2.1 search song and parse result
                         search_results = plugin._search_song(lib, song)
+
+                        if not search_results:
+                            self._log.log("debug", f"No results found for song: {song} on platform {platform}")
+                            continue
                         parsed_results = plugin._parse_search_results(lib, search_results)
+
                         # 2.2 match result against song
                         song_match = None
                         for result in parsed_results:
                             if result == song:
                                 song_match = result
                                 break
-                        # 2.3 no match: UNABLE TO ADD
+                        
+                        # 2.3 no match: continue with next song
                         if not song_match:
-                            print( "NO MATCH IN RESULTS")
+                            songs_not_found += 1
+                            self._log.log("debug", f"No MATCHES for song: {song} on platform {platform}")
+                            continue
+                        
                         
                         # 3. add song to playlist
                         plugin._add_song_to_playlist(song_match, playlist_id)
@@ -241,27 +280,103 @@ class PlatformManager(BeetsPlugin):
                                 for key in p
                             }
 
-                            return SongData(**merged)
+                            song_data = SongData(**merged)
+                            return song_data
 
                         # 4.1 Update Items table
                         updated_song = sync_models(song_match, song)
                         self._update_song(lib, updated_song)
+            
+            self._log.log('debug', f"FINISHED SYNC: {playlist_name}. {songs_not_found}/{len(sets[platform])} songs NOT ADDED")
+        
+        
+        
+        for playlist_name, songs in total.items():
+            self._log.log('debug', f"STARTING THE UPDATE OF PLAYLISTS IN DATABASE")
 
-                        # 4.2 Update Playlist table
-                        self._update_playlist(lib, )
+            # playlist data
+            playlist_data = self._get_playlist_if_exits(lib, playlist_name)
+            playlist_data['last_edited_at'] = str(datetime.datetime.now().timestamp())
+            playlist_data['name'] = playlist_name
+            for platform in VALID_PLATFORMS:
+                playlist_data[f'{platform}_id'] = playlist_ids[platform]
 
+            # 4.2 Update Playlist table
+            playlist_data = PlaylistData(**playlist_data)
+            self._update_playlist(lib, playlist_name, playlist_data)
+            [
+                self._update_playlist_items(lib, playlist_data, song) for song in songs
+            ]
+            self._log.log("debug", f"succesfully updated playlist item linking table for playlist {playlist_name}")
         return
    
-   
-    def _get_plugin(self, platform):
-        """Return the appropriate plugin class based on the platform."""
-        if platform == 'spotify':
-            return spotify_plugin
-        elif platform == 'youtube':
-            return youtube_plugin
-        else:
-            raise ValueError(f"Unsupported platform: {platform}")
+    def _update_playlist(self, lib, playlist_name: str, playlist: PlaylistData):
 
+        with lib.transaction() as tx:
+            result = tx.query(
+                "SELECT id from playlist WHERE name = ?",
+                (playlist_name,)
+            )
+        
+            if result:
+                tx.mutate(
+                    "UPDATE playlist SET spotify_id = ?, youtube_id = ?, last_edited_at = ? WHERE name = ?",
+                    (playlist.spotify_id, playlist.youtube_id, playlist.last_edited_at, playlist_name)
+                )
+            else:
+                # 2b. Insert new record
+                tx.mutate(
+                    "INSERT INTO playlist (name, spotify_id, youtube_id, last_edited_at) VALUES (?, ?, ?, ?)",
+                    (playlist_name, playlist.spotify_id, playlist.youtube_id, playlist.last_edited_at)
+            )
+        
+        self._log.log("debug", f"succesfully updated playlist in db: {playlist_name}")
+        return
+
+    def _update_playlist_items(self, lib, playlist: PlaylistData, song: SongData):
+
+        with lib.transaction() as tx:
+
+            playlist_id = dict(tx.query(
+                "SELECT id FROM playlist WHERE name = ? COLLATE NOCASE",
+                (playlist.name,)
+            )[0])['id']
+
+
+            song = self._get_item_if_exists(lib, song.model_dump())
+
+            if not song:
+                return
+            
+            song_id = song.id
+
+            try:
+                tx.mutate(
+                    "INSERT INTO playlist_item (playlist_id, item_id) VALUES (?, ?)",
+                    (playlist_id, song_id)
+                )
+            except sqlite3.IntegrityError as e:
+                # unique constraint failed
+                pass
+        return
+
+    def _get_playlist_if_exits(self, lib, playlist_name):
+        with lib.transaction() as tx:
+            results = tx.query(
+                "SELECT * from playlist WHERE name = ?",
+                (playlist_name,)
+            )
+            result_dicts = [dict(result) for result in results]
+
+            if result_dicts:
+                playlist_data = result_dicts[0]
+                return playlist_data
+            else:
+                return {}
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # SONGS / ITEMS TABLE
+    # ──────────────────────────────────────────────────────────────────────────
     def _update_song(self, lib, song: SongData):
             """
             Add or update the song_data in the beets library DB.
@@ -372,6 +487,23 @@ class PlatformManager(BeetsPlugin):
 
             return
 
+
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # HELPER
+    # ──────────────────────────────────────────────────────────────────────────
+    def _get_plugin(self, platform):
+        """Return the appropriate plugin class based on the platform."""
+        if platform == 'spotify':
+            return spotify_plugin
+        elif platform == 'youtube':
+            return youtube_plugin
+        else:
+            raise ValueError(f"Unsupported platform: {platform}")
+
+
+    
+ 
 
 
 

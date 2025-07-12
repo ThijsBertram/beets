@@ -2,22 +2,23 @@ from pydantic import BaseModel, field_validator
 from typing import List, Optional, Tuple
 from beets.library import DateType
 import datetime
+from fuzzywuzzy import fuzz
 
 class PlaylistData(BaseModel):
-    namme: str
-    description: str = ''
+    name: str
+    description: Optional[str] = ''
     spotify_id: str = ''
     youtube_id: str = ''
-    soundcloud_id: str = ''
-    path: str = ''
-    last_edited_at = ''
-    type = ''
+    soundcloud_id: Optional[str] = ''
+    path: Optional[str] = ''
+    last_edited_at: str = ''
+    type: Optional[str] = ''
     
 
 class SongData(BaseModel):
     title: str
     main_artist: str
-    artists: Tuple[str]
+    artists: Tuple = ()
     genre: str = ''
     subgenre: str = ''
     youtube_id: str = ''
@@ -31,7 +32,19 @@ class SongData(BaseModel):
 
     def __eq__(self, other):
         if isinstance(other, SongData):
-            return (self.artists, self.title) == (other.artists, other.title)
+
+            # print(self.title.lower())
+            # print(other.title.lower())
+            # print()
+            # print(' '.join(self.artists).lower())
+            # print(' '.join(other.artists).lower())
+
+            # print()
+            # print()
+            title_alike = 1 if fuzz.ratio(self.title.lower(), other.title.lower()) >= 97 else 0 
+            artists_alike = 1 if fuzz.ratio(' '.join(self.artists).lower(), ' '.join(other.artists).lower()) >= 97 else 0
+            alike = 1 if artists_alike and title_alike else 0
+            return alike
         
     def __hash__(self):
         return hash((self.artists, self.title))
