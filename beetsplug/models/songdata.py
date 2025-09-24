@@ -1,19 +1,9 @@
 from pydantic import BaseModel, field_validator
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 from beets.library import DateType
 import datetime
 from fuzzywuzzy import fuzz
 
-class PlaylistData(BaseModel):
-    name: str
-    description: Optional[str] = ''
-    spotify_id: str = ''
-    youtube_id: str = ''
-    soundcloud_id: Optional[str] = ''
-    path: Optional[str] = ''
-    last_edited_at: str = ''
-    type: Optional[str] = ''
-    
 
 class SongData(BaseModel):
     title: str
@@ -61,3 +51,22 @@ class SongData(BaseModel):
             return tuple(sorted([artist.strip().lower() for artist in value]))
 
         return value
+    
+
+class PlaylistData(BaseModel):
+    name: str
+    description: Optional[str] = ''
+    path: Optional[str] = ''    
+    rkbx_id: str = ''
+    spotify_id: str = ''
+    youtube_id: str = ''
+    soundcloud_id: Optional[str] = ''
+    last_edited_at: str = ''
+    type: Optional[str] = ''
+    songs: Dict = {
+        'youtube': None,
+        'spotify': None,
+        'total': None,
+        'rkbx': None,
+        'usb': None
+    }

@@ -122,8 +122,6 @@ class SpotifyPlugin(BeetsPlugin, Platform):
         song_data = SongData(**dict(song_data))
         return song_data
 
-
-
     def _create_playlist(self, playlist_name):
         existing_playlists = self._get_all_playlists()
 
@@ -144,7 +142,6 @@ class SpotifyPlugin(BeetsPlugin, Platform):
             playlist_id = new_playlist["id"]
 
         return playlist_id
-
     
     def _search_song(self,
                      lib,
@@ -165,16 +162,11 @@ class SpotifyPlugin(BeetsPlugin, Platform):
         except Exception as e:
             self._log.log("error", f"Error searching Spotify for track: {e}")
             return None
-    
-    
+        
     def _parse_search_results(self, lib, results):
         songs = [self._parse_song_item(lib, result, search_results=True) for result in results]
 
         return songs
-
-
-    
-    
     
     def match_results(self, 
                       track: Dict[str, str], 

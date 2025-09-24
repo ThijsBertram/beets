@@ -116,7 +116,158 @@ class PlatformManager(BeetsPlugin):
 
         self.pull_platform_songs(lib, platform_str, playlist_name, playlist_type, no_db)
 
-    
+    # ──────────────────────────────────────────────────────────────────────────
+    # OLD: PULL ALL DATA
+    # ──────────────────────────────────────────────────────────────────────────      
+
+    def pull_platform_songs(
+        self,
+        lib,
+        platform_str='all',
+        playlist_name='all',
+        playlist_type='mm',
+        no_db=False
+    ):
+        """
+        Core logic to pull song data from the specified platform(s) and add/update
+        the Beets library.
+
+        It can be called from:
+          1) The CLI subcommand (via `cli_pull_platform`).
+          2) Another Python script, e.g.:
+             `PlatformManager().pull_platform_songs(lib, 'spotify', 'all', 'mm', no_db=False)`
+        """
+        new = []
+        existing = []
+        # 1. Determine which PLATFORM(s) we'll process
+        if platform_str == 'all':
+            platforms_to_fetch = VALID_PLATFORMS
+        else:
+            # If user gave a single platform string, wrap it in a list
+            if isinstance(platform_str, str):
+                platforms_to_fetch = [platform_str]
+            else:
+                platforms_to_fetch = platform_str.split(',')
+
+
+        # 1.1 Map each platform string to a plugin class
+        platform_dict = {
+            pf: self._get_plugin(pf)
+            for pf in platforms_to_fetch
+        }
+
+        # 1.2 Get all playlists from each platform
+        all_playlists = {pf: [] for pf in VALID_PLATFORMS}
+        for name, pf_plugin_cls in platform_dict.items():
+            with pf_plugin_cls() as plugin:
+                all_playlists[name].extend(plugin._get_all_playlists())
+
+
+        # 1.3 Filter playlists based on the playlist name, type, etc.
+        #     We'll store them in a dict: {platform_name: [playlists_to_process]}
+        playlists_to_process = {pf: [] for pf in VALID_PLATFORMS}
+        for pf_name, pl_list in all_playlists.items():
+            if not pl_list:
+                continue
+
+            # We'll need to open the plugin instance again to check `plugin.pl_to_skip`, etc.
+            pf_plugin_cls = platform_dict.get(pf_name)
+            if not pf_plugin_cls:
+                continue
+
+            with pf_plugin_cls() as plugin:
+
+                # PLAYLIST INCLUSION LOGIC
+                def should_include(playlist, to_exclude, playlist_name, playlist_type):
+                    """Return True if a given playlist should be included."""
+
+                    pl_to_select = [pl.lower() for pl in playlist_name.split(',')]
+
+                    if playlist_type.lower() not in playlist['playlist_name'].lower():
+                        return False
+
+                    # 1. PL TO SKIP CONFIG
+                    if playlist_name.lower() in to_exclude.lower():
+                        return False
+
+                    # 2) Special case: if ' pl ' in p['playlist_name'] AND playlist_type == 'mm', skip
+                    if ' pl ' in playlist['playlist_name'] and playlist_type == 'mm':
+                        return False
+
+                    if playlist_name == 'all':
+                        return True
+                    else:
+                        if any(pl in playlist['playlist_name'].lower() for pl in pl_to_select):
+                            return True
+                        else:
+                            return False
+
+                selected = [p for p in pl_list if should_include(p, 
+                                                                 to_exclude=plugin.pl_to_skip, 
+                                                                 playlist_name=playlist_name, 
+                                                                 playlist_type=playlist_type)]   
+
+                playlists_to_process[pf_name].extend(selected)    
+
+        # Logging how many playlists per platform
+        for pf in VALID_PLATFORMS:
+            num_pl = len(playlists_to_process[pf])
+            color = PLATFORM_LOG_COLOR.get(pf, '')
+            self._log.log("info",f"{num_pl} playlists to process for {pf}")
+
+        # 2. Retrieve songs for each platform and optionally add to DB
+        for pf_name, playlists in playlists_to_process.items():
+            if not playlists:
+                continue
+
+            pf_plugin_cls = platform_dict.get(pf_name)
+            if not pf_plugin_cls:
+                continue
+
+            with pf_plugin_cls() as plugin:
+                for pl in playlists:
+                    # 2.1 get raw tracks
+                    tracks = plugin._get_playlist_tracks(pl['playlist_id'])
+
+                    # 2.2 parse raw tracks
+                    parsed_tracks = [
+                        plugin._parse_track_item(lib, item)
+                        for item in tracks['items']
+                    ]
+
+                    # 2.3 add playlist & genre info
+                    song_data = []
+                    for track in parsed_tracks:
+                        if not track:
+                            continue
+                        try:
+                            track['platform'] = pf_name
+                            track['playlist_name'] = pl['playlist_name']
+                            track['playlist_id'] = pl['playlist_id']
+                            track['playlist_description'] = pl['playlist_description']
+                            if playlist_type == 'mm':
+                                split_name = pl['playlist_name'].split(' - ')
+                                track['genre'] = split_name[1] if len(split_name) > 1 else ''
+                                track['subgenre'] = split_name[2] if len(split_name) > 2 else ''
+                            song_data.append(SongData(**track).model_dump())
+                        except Exception as e:
+                            self._log.error(f"Error adding playlist info to track: {e}")
+
+                    # Logging
+                    self._log.log("info",
+                        f"{len(parsed_tracks)} songs found in "
+                        f"{pl['playlist_name']} on {pf_name}"
+                    )
+
+                    # 2.4 If `no_db` is False, add/update songs in DB
+                    if not no_db:
+                        n, e = self.add_to_db(lib, song_data)
+                        new.extend(n)
+                        existing.extend(e)
+                        self._log.log("info",f"{len(new)}/{len(new) + len(existing)} new songs added")
+        
+        return new, existing
+
     # ──────────────────────────────────────────────────────────────────────────
     # PULL DATA
     # ──────────────────────────────────────────────────────────────────────────    
@@ -136,9 +287,10 @@ class PlatformManager(BeetsPlugin):
             }
         }
         """
+
+        playlist_data = list()
         
         # 1.1 Map each platform string to a plugin class
-
         data = {pf: {} for pf in VALID_PLATFORMS}
 
         # 1.2 Get all playlists from each platform
@@ -217,7 +369,25 @@ class PlatformManager(BeetsPlugin):
     # ──────────────────────────────────────────────────────────────────────────
     # PLAYLISTS
     # ──────────────────────────────────────────────────────────────────────────
-    def sync_playlists(self, lib, diff, total):
+    def sync_playlists(self, lib, diff, total, sync_type='Union'):
+        """Sync playlists between platforms by adding and deleting songs according to the sync type
+        This function takes the following stpes:
+            1. loops over all playlists in the `diff` object
+            2. for every playlist, loop over all platforms 
+            3. for every playlist on every platform, loop over the MISSING songs within that platform
+            4. search for the misisng song on the platform. Continue with next song if no results are found
+            5. add song to playlist on platform using `_add_song_to_playlist()`
+            6. update song in beets entry using `_update_song()` 
+
+        Args:
+            lib (_type_): _description_
+            diff (_type_): _description_
+            total (_type_): _description_
+            sync_type (str, optional): _description_. Defaults to 'Union'.
+
+        Returns:
+            _type_: _description_
+        """
         
         playlist_ids = dict()
 
@@ -230,9 +400,6 @@ class PlatformManager(BeetsPlugin):
             songs_not_found = 0
 
             for platform, platform_plugin in self.platform_dict.items():
-
-                
-                
 
                 # 1. Make sure playlist exists
                 with platform_plugin() as plugin:
@@ -265,8 +432,7 @@ class PlatformManager(BeetsPlugin):
                             songs_not_found += 1
                             self._log.log("debug", f"No MATCHES for song: {song} on platform {platform}")
                             continue
-                        
-                        
+                                  
                         # 3. add song to playlist
                         plugin._add_song_to_playlist(song_match, playlist_id)
 
@@ -501,13 +667,7 @@ class PlatformManager(BeetsPlugin):
         else:
             raise ValueError(f"Unsupported platform: {platform}")
 
-
-    
- 
-
-
-
-
+    # overbodig in refactor???
     def add_to_db(self, lib, songs: List[SongData]):
             """
             Add or update the song_data in the beets library DB.

@@ -207,7 +207,7 @@ class YoutubePlugin(BeetsPlugin):
         # ARTISTS
         artists = song_data.pop('artists')
         if not artists:
-            self._log.log("debug", "The 'artists' list is empty before deduplication.")
+            self._log.debug("The 'artists' list is empty before deduplication.")
             return dict()
         # Remove duplicates based on substrings
         substrings = {a for a in artists for other in artists if a != other and a in other}
