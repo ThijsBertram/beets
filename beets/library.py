@@ -566,10 +566,12 @@ class Item(LibModel):
         "subgenre": types.STRING,
         "spotify_id": types.STRING,
         "youtube_id": types.STRING,
+        "rekordbox_id": types.STRING,
         "last_edited": DateType(),
         "last_edited_ISO": types.STRING,
         "tags": types.STRING,
-        "rekordbox_colour": types.STRING
+        "rekordbox_colour": types.STRING,
+        "last_download_attempt": types.STRING
     }
 
     _search_fields = (

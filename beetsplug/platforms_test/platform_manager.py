@@ -612,26 +612,22 @@ class PlatformManager(BeetsPlugin):
         """
         item = None
 
-        # 1) Check by platform ID
-        platform_ids = {
-            platform: song[f'{platform}_id']
-            for platform in VALID_PLATFORMS
-            if song.get(f'{platform}_id')
-        }
-        for platform, platform_id in platform_ids.items():
-            q = f'{platform}_id:"{platform_id}"'
-            item = lib.items(q).get()
-            if item:
-                self._log.log("debug",f"Found item {item} using {platform} id")
-                return item
-
+        for platform in VALID_PLATFORMS:
+            if getattr(song, f'{platform}_id'):   
+                platform_id = getattr(song, f'{platform}_id')         
+                q = f'{platform}_id:"{platform_id}"'
+                item = lib.items(q).get()
+                if item:
+                    self._log.log("debug",f"Found item {item} using {platform} id")
+                    return item
+        
         # 2) Fallback: title & artist matching
         if not item:
             try:
                 title = song['title']
-                remixer = song.get('remixer', '')
-                artist = song.get('main_artist', '')
-                feat_artist = song.get('feat_artist', '')
+                remixer = getattr(song, 'remixer')
+                artist = getattr(song, 'main_artist')
+                feat_artist = getattr(song, 'feat_artist')
 
                 t = RegexpQuery('title', f'(?i){re.escape(title)}')
                 a = RegexpQuery('artist', f'(?i){re.escape(artist)}')

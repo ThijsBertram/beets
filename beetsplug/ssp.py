@@ -422,4 +422,3 @@ class SongStringParser(BeetsPlugin):
         else:
             return ', '.join(string_list[:-1]) + ' & ' + string_list[-1]
         
-    

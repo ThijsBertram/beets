@@ -95,7 +95,7 @@ class SoulSeekPlugin(BeetsPlugin):
     # ──────────────────────────────────────────────────────────────────────────
     #  CALLABLE FROM OTHER CODE (e.g. your pipeline)
     # ──────────────────────────────────────────────────────────────────────────
-    async def download_songs(self, lib, n_tries=3, genres='all', items=None):
+    async def download_songs(self, lib, n_tries=3, items=None):
         """
         The *core* method to download songs.
 
@@ -104,12 +104,6 @@ class SoulSeekPlugin(BeetsPlugin):
           2) Your custom pipeline code, e.g.:
               await plugin.download_songs(lib, 5, 'rock')
         """
-        # 1. Get the relevant library items (those missing files, matching genres, etc.)
-        if not items:
-            items = self._get_library_items(lib, genres)
-        else:
-            items = [item for item in items if not item.path]
-        self._log.log("info", f"{len(items)} items to download with n_tries={n_tries}, genres={genres}.")
 
         # 2. Clear previous results
         self.results = []

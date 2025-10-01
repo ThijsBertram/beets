@@ -12,12 +12,17 @@ from beetsplug.soulseek.SoulseekPlugin import SoulSeekPlugin
 from beetsplug.platforms_test.platform_manager import PlatformManager	
 from beetsplug.custom_logger import CustomLogger
 from beetsplug.mm_rekordbox import RekordboxSyncPlugin
+from beetsplug.utils.database import DataBaseUtils
 
 from beetsplug.platforms_test.platform import VALID_PLATFORMS, VALID_PLAYLIST_TYPES
 from beetsplug.models.songdata import SongData, PlaylistData
 
 # TO DO
 # PRIOTIRTIES
+# - RKBX: BEETS sync
+# - BEETS -> Playlist -> Platform Sync
+# - SLSK: simplify search query if possible.
+
 # - refactor pull_data to return playlistData ?? 
 # - Update download part to downlaod based on SongData 
 #       --dl='pipe' -> Only download missing songs that have been pulled by previous pipeline stage
@@ -58,8 +63,6 @@ from beetsplug.models.songdata import SongData, PlaylistData
 #       - platform sync
 
 
-
-
 class MuziekMachine(BeetsPlugin):
 
     # ===================================================================
@@ -69,6 +72,10 @@ class MuziekMachine(BeetsPlugin):
     def __init__(self):
         super().__init__()
         self._log = CustomLogger("MuziekMachine", default_color="purple")
+
+        self.dbu = DataBaseUtils()
+        self.pm = PlatformManager()
+        self.slsk = SoulSeekPlugin()
 
         # ---------------------------------------------------------------
         # COMPLETE PIPELINE
@@ -96,7 +103,7 @@ class MuziekMachine(BeetsPlugin):
         )
         # dl
         self.pipeline_cmd.parser.add_option(
-            '--dl', default='pipeline',
+            '--dl', default='pipe', choices=['pipe', 'time', 'all'],
         )
         # sync
         self.pipeline_cmd.parser.add_option(
@@ -132,8 +139,21 @@ class MuziekMachine(BeetsPlugin):
         return
 
     def run_pipeline(self, lib, platform_str, playlist_str, dl, sync):
-        """Runs the pipeline in stages, chaining results from each stage."""
+        """Runs complete pipeline for a give (set of) playlist(s).
+        The pipeline consists of the following steps. Extension/module as prefix in caps:
 
+        1. PM: pull data from platforms
+        2. PM: sync data between platforms 
+        3. SLSK: download missing songs
+        4. AA: analyze song audio 
+        5. RKBX: Sync beets / rekordbox 
+        6. DJ: update DJ folders
+        
+        Keyword arguments:
+        argument -- description
+        Return: return_description
+        """
+    
         pm = PlatformManager()
 
 
@@ -153,8 +173,13 @@ class MuziekMachine(BeetsPlugin):
             
         """
         platform_data = pm.pull_data(lib, playlist_name=playlist_str)
+        pulled_songs = [item for src in platform_data.values() for lst in src.values() for item in lst]
 
-        print(platform_data)
+        # UGLY, FIX NONE VALUES IN PM.PULL_DATA METHOD
+        pulled_songs = [song for song in pulled_songs if song]
+
+        # ADD NEW SONGS TO DATABASE
+        new_count = sum([self.dbu.add_or_update(lib, song) for song in pulled_songs])
         # self._log.log("info", f" STAGE 1 COMPLETED: Pulled {len(new_items)} new items, {len(updated_items)} updated items from platforms: {platform_str}, plalylist: {playlist_str}.")
 
 
@@ -176,44 +201,48 @@ class MuziekMachine(BeetsPlugin):
                 }
             
         """
-        if sync:
-            # 1.1 Calculate platform differences
-            missing, total = pm._platform_diff(lib, platform_data)
+        # if sync:
+        #     # 1.1 Calculate platform differences
+        #     missing, total = pm._platform_diff(lib, platform_data)
+        # #     # 1.2 : Update playlists
+        # #     pm.sync_playlists(lib, diff, total, sync_type)
 
-        #     # 1.2 : Update playlists
-        #     pm.sync_playlists(lib, diff, total, sync_type)
-        #     # ────────────────────────────────────────────────────────
-
-        return
-
-        # # ────────────────────────────────────────────────────────
-        # # Stage 2: Download songs with SoulSeek, only for the items returned
-        # # ────────────────────────────────────────────────────────
-        soulseek = SoulSeekPlugin()
         
-        if dl != 'skip':
-            if not dl:
-                stage1_items = None
-
-            self._log.log("info", f"Feeding {len(stage1_items)} items to SoulSeek for download...")
-            async def do_soulseek_download():
-                results = await soulseek.download_songs(
-                    lib,
-                    genres=None,          # or 'all', but we can override with "items" param
-                    items=stage1_items    # Only process these items from stage 1
-                )
-                return results
-
-            # Run the async method in a synchronous pipeline
-            results = asyncio.run(do_soulseek_download())
-            successes = [r for r in results if r['status'] == 'success']
-            self._log.log("info", f"SoulSeek download stage: {len(successes)} successful downloads out of {len(results)} attempts.")
-        else:
-            self._log.log("info", "Skipping SoulSeek download stage.")
-
         # # ────────────────────────────────────────────────────────
         # # Stage 2: Download songs with SoulSeek, only for the items returned
         # # ────────────────────────────────────────────────────────
-        rkbx = RekordboxSyncPlugin()
-        updated_beets, updated_rekordbox, kapot_verkeerd_items = rkbx.sync_rekordbox(lib, fields=None, xml_path=None, remove_kapot=False)
+
+        
+
+
+        if dl == 'pipe':
+            to_download = self.dbu.items_to_download(lib, songs=pulled_songs, dl_cooldown=7, output='Item')
+        elif dl == 'all':
+            to_download = self.dbu.items_to_download(lib, dl_cooldown=None, output='Item')
+        elif dl == 'time':
+            to_download = self.dbu.items_to_download(lib, dl_cooldown=7, output='Item')
+        else:
+            self._log.log("info", "Skipping SoulSeek download stage.")          
+
+        self._log.log("info", f"Feeding {len(to_download)} items to SoulSeek for download...")
+
+
+        async def do_soulseek_download():
+            results = await self.slsk.download_songs(
+                lib,
+                items=to_download    # Only process these items from stage 1
+            )
+            return results
+
+        # Run the async method in a synchronous pipeline
+        results = asyncio.run(do_soulseek_download())
+        successes = [r for r in results if r['status'] == 'success']
+        self._log.log("info", f"SoulSeek download stage: {len(successes)} successful downloads out of {len(results)} attempts.")
+           
+
+        # # # ────────────────────────────────────────────────────────
+        # # # Stage 2: Download songs with SoulSeek, only for the items returned
+        # # # ────────────────────────────────────────────────────────
+        # rkbx = RekordboxSyncPlugin()
+        # updated_beets, updated_rekordbox, kapot_verkeerd_items = rkbx.sync_rekordbox(lib, fields=None, xml_path=None, remove_kapot=False)
 

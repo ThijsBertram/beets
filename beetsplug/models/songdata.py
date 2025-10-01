@@ -3,7 +3,7 @@ from typing import List, Optional, Tuple, Dict
 from beets.library import DateType
 import datetime
 from fuzzywuzzy import fuzz
-
+from typing import Dict, List
 
 class SongData(BaseModel):
     title: str
@@ -19,6 +19,14 @@ class SongData(BaseModel):
     remixer: str = ''
     remix_type: str = ''
     last_edited_ISO: str = datetime.datetime.now().isoformat()
+    # REKORDBOX
+    rekordbox_id: str = ''
+    rekordbox_path: str = ''
+    rekordbox_bpm: float = None
+    rekordbox_tonality: str = ''
+    rekordbox_comments: str = ''
+    rekordbox_rating: str = ''
+    rekordbox_cateogry: str = ''
 
     def __eq__(self, other):
         if isinstance(other, SongData):
@@ -51,6 +59,14 @@ class SongData(BaseModel):
             return tuple(sorted([artist.strip().lower() for artist in value]))
 
         return value
+
+    
+    # @field_validator('added', mode='before')
+    # def datetime_to_iso(cls, value):
+    #     if isinstance(value, datetime.datetime):
+    #         return value.isoformat()
+    #     if isinstance(value, type(None)):
+    #         return ''
     
 
 class PlaylistData(BaseModel):
@@ -62,11 +78,11 @@ class PlaylistData(BaseModel):
     youtube_id: str = ''
     soundcloud_id: Optional[str] = ''
     last_edited_at: str = ''
-    type: Optional[str] = ''
-    songs: Dict = {
-        'youtube': None,
-        'spotify': None,
-        'total': None,
-        'rkbx': None,
-        'usb': None
+    playlist_type: Optional[str] = ''
+    songs: dict = {
+        'youtube':  List[SongData],
+        'spotify': List[SongData],
+        'total': List[SongData],
+        'rkbx': List[SongData],
+        'usb': List[SongData]
     }
