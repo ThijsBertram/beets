@@ -130,7 +130,17 @@ class RekordboxSyncPlugin(BeetsPlugin):
         self.dbu = DataBaseUtils()
 
         self.root = None
+        root = self.xml_path
 
+         # 2) Parse XML
+        try:
+            self._validate_path(self.xml_path)
+            tree = ET.parse(self.xml_path)
+            root = tree.getroot()
+            self.root = root
+        except Exception as e:
+            self._log.log("error", f"Error reading Rekordbox XML: {e}")
+            return (0, 0, [])
 
         self.get_command = Subcommand('get-rkbx')
         self.get_command.func = self.remove_track
@@ -156,22 +166,10 @@ class RekordboxSyncPlugin(BeetsPlugin):
 
     
     def get_rkbx_songs(self, lib, opts, args):
-        
-        root = self.xml_path
-
-         # 2) Parse XML
-        try:
-            self._validate_path(self.xml_path)
-            tree = ET.parse(self.xml_path)
-            root = tree.getroot()
-            self.root = root
-        except Exception as e:
-            self._log.log("error", f"Error reading Rekordbox XML: {e}")
-            return (0, 0, [])
 
         songs = list()
 
-        for track_elem in root.findall('.//TRACK'):
+        for track_elem in self.root.findall('.//TRACK'):
             track_data = {
                 'rekordbox_id': track_elem.get('TrackID'),
                 'artists': track_elem.get('Artist'),
@@ -229,15 +227,52 @@ class RekordboxSyncPlugin(BeetsPlugin):
 
     def remove_track(self, lib, opts, args):
 
-        bad_songs = self.get_broken_songs(lib, opts, args)
+        # ALL TRACKS NOT IN A PLAYLIST 
 
-        for song in bad_songs:
-            rkbx_id = song.rekordbox_id
+        node_name = None
 
-            track_element = self.root.findall(f".//TRACK[@TrackID='{rkbx_id}']")
+        if node_name is None:
+            tracks =  self.root.findall(".//TRACK")
+        else:
+            # Find NODEs with the given Name attribute (case-sensitive)
+            candidate_nodes = [n for n in self.root.findall(".//NODE") if n.get("Name") == node_name]
 
-            print(track_element)
-            print()
+            tracks = []
+            for node in candidate_nodes:
+                tracks.extend(node.findall(".//TRACK"))
+
+        # print(tracks[0].keys())
+
+        track_ids = [track.get('TrackID') if track.get('TrackID') else track.get('Key') for track in tracks]
+        track_set = set(track_ids)
+
+
+        print(len(track_ids))
+        print(len(track_set))
+
+        print('hoi')
+        
+
+
+        # REMOVE TRACKS 
+        # bad_songs = self.get_broken_songs(lib, opts, args)
+
+        # for song in bad_songs:
+        #     rkbx_id = song.rekordbox_id
+
+        #     track_element = self.root.findall(f".//TRACK[@TrackID='{rkbx_id}']")[0]
+        #     track_path = track_element.get('Location')
+        #     print(song.path)
+
+            
+        #     track_id = track_element.get('TrackID')
+
+
+        #     print(track_path)
+        #     print(track_id)
+        #     print()
+        #     print(song == track_element)
+        #     quit()
             
         return
 

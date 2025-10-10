@@ -8,6 +8,8 @@ from beets.ui import Subcommand
 from beets.library import Library
 from beets import config
 
+from typing import List
+
 from beetsplug.soulseek.SoulseekPlugin import SoulSeekPlugin
 from beetsplug.platforms_test.platform_manager import PlatformManager	
 from beetsplug.custom_logger import CustomLogger
@@ -76,6 +78,7 @@ class MuziekMachine(BeetsPlugin):
         self.dbu = DataBaseUtils()
         self.pm = PlatformManager()
         self.slsk = SoulSeekPlugin()
+        self.rkbx = RekordboxSyncPlugin()
 
         # ---------------------------------------------------------------
         # COMPLETE PIPELINE
@@ -103,7 +106,7 @@ class MuziekMachine(BeetsPlugin):
         )
         # dl
         self.pipeline_cmd.parser.add_option(
-            '--dl', default='pipe', choices=['pipe', 'time', 'all'],
+            '--dl', default='pipe', choices=['skip', 'pipe', 'time', 'all'],
         )
         # sync
         self.pipeline_cmd.parser.add_option(
@@ -134,7 +137,43 @@ class MuziekMachine(BeetsPlugin):
     # ===================================================================
     # FUNCTINALITIES: the actual functions called by CLI
     # ===================================================================
+
+    def rkbx_not_in_playlist(self, lib, dj_only=True) -> List[SongData]:
+        """This function gets all the songs (as SongData objects) that are NOT in a rekordbox DJ playlist
+
+        Args:
+            lib (_type_): _description_
+            dj_only (bool, optional): _description_. Defaults to True.
+
+        Returns:
+            List[SongData]: _description_
+        """
+
+        songs = self.rkbx.get_rkbx_songs()
+
+
+
+        return
+
+
+
+    def complete_songdata(self, lib, song: SongData) -> SongData:
+        
+
+
+        # rkbx
+
+        # beets item
+
+        # 
     
+    
+        return
+
+
+
+
+
     def get_playlist():
         return
 

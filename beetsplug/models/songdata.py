@@ -7,18 +7,20 @@ from typing import Dict, List
 
 class SongData(BaseModel):
     title: str
+    path: str
     main_artist: str
     artists: Tuple = ()
     genre: str = ''
     subgenre: str = ''
-    youtube_id: str = ''
-    spotify_id: str = ''
-    playlist_name: str = ''
-    playlist_id: str = ''
-    playlist_description: str = ''
     remixer: str = ''
     remix_type: str = ''
     last_edited_ISO: str = datetime.datetime.now().isoformat()
+    # PLATFORMS
+    youtube_id: str = ''
+    spotify_id: str = ''
+    soundcloud_id: str = ''
+    #PLAYLIST
+    playlist: dict = {}
     # REKORDBOX
     rekordbox_id: str = ''
     rekordbox_path: str = ''
@@ -30,18 +32,12 @@ class SongData(BaseModel):
 
     def __eq__(self, other):
         if isinstance(other, SongData):
-
-            # print(self.title.lower())
-            # print(other.title.lower())
-            # print()
-            # print(' '.join(self.artists).lower())
-            # print(' '.join(other.artists).lower())
-
-            # print()
-            # print()
+            # Match based on TITLE and ARTIST
             title_alike = 1 if fuzz.ratio(self.title.lower(), other.title.lower()) >= 97 else 0 
             artists_alike = 1 if fuzz.ratio(' '.join(self.artists).lower(), ' '.join(other.artists).lower()) >= 97 else 0
             alike = 1 if artists_alike and title_alike else 0
+
+            # 
             return alike
         
     def __hash__(self):
