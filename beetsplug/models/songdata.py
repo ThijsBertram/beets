@@ -5,9 +5,14 @@ import datetime
 from fuzzywuzzy import fuzz
 from typing import Dict, List
 
+from beets.library import Item
+
+from beetsplug.ssp import SongStringParser
+
+
 class SongData(BaseModel):
     title: str
-    path: str
+    path: Optional[str] = ''
     main_artist: str
     artists: Tuple = ()
     genre: str = ''
@@ -29,6 +34,24 @@ class SongData(BaseModel):
     rekordbox_comments: str = ''
     rekordbox_rating: str = ''
     rekordbox_cateogry: str = ''
+
+
+    @classmethod
+    def from_string(cls, data: str) -> "SongData":
+        # LOGIC FOR CREATING SONGDATA FROM STRING
+        return
+    
+    @classmethod
+    def from_youtube(cls, data: dict) -> "SongData":
+        return
+    
+    @classmethod
+    def from_spotify(cls, data: dict) -> "SongData":
+        return
+
+    @classmethod
+    def from_beets(cls, data: Item) -> "SongData":
+        return
 
     def __eq__(self, other):
         if isinstance(other, SongData):

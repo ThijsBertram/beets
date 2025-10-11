@@ -309,14 +309,21 @@ class PlatformManager(BeetsPlugin):
                 if sync_pattern in playlist['playlist_name']:
                     playlists_to_sync[platform].append(playlist)
 
+        print(playlists_to_sync)
+        print()
+
         # Get all tracks for the playlists and store them.
         for platform, playlists in playlists_to_sync.items():
             for playlist in playlists:
                 with self.platform_dict[platform]() as plugin:
                     tracks = plugin._get_playlist_tracks(playlist['playlist_id'])
                     playlist_tracks = [plugin._parse_song_item(lib, track | playlist) for track in tracks]   
-                    data[platform][playlist['playlist_name']] = playlist_tracks
-                break    
+                    data[platform][playlist['playlist_name']] = playlist_tracks    
+
+        for pl in data['youtube']:
+            for song in data['youtube'][pl]:
+                print(song)
+
 
         return data
        
@@ -453,9 +460,7 @@ class PlatformManager(BeetsPlugin):
                         updated_song = sync_models(song_match, song)
                         self._update_song(lib, updated_song)
             
-            self._log.log('debug', f"FINISHED SYNC: {playlist_name}. {songs_not_found}/{len(sets[platform])} songs NOT ADDED")
-        
-        
+            self._log.log('debug', f"FINISHED SYNC: {playlist_name}. {songs_not_found}/{len(sets[platform])} songs NOT ADDED")                
         
         for playlist_name, songs in total.items():
             self._log.log('debug', f"STARTING THE UPDATE OF PLAYLISTS IN DATABASE")

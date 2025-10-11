@@ -19,6 +19,31 @@ from beetsplug.utils.database import DataBaseUtils
 from beetsplug.platforms_test.platform import VALID_PLATFORMS, VALID_PLAYLIST_TYPES
 from beetsplug.models.songdata import SongData, PlaylistData
 
+# TO DO 11-10
+#   - REFACTOR TO SEPEARTE:
+#       * platform_plugin (makes api calls, authentication, pagination etc)
+#       * mapping layer (SpotifyMapper, YoutubeMapper etc) that have a method SpotifyMapper.to_songdata(raw_track_dict)
+#       * Domain Model (SongData)
+#   - SongData
+#       * MATCHING FUCNTIONALITY
+#           - so we can delete this mathing logic from the platform plugins etc and use the uniform matching functionality of SongData.
+#   - SLSKD
+#       * Make plugin OPTIONAL
+#       * 3 downloads attempts
+#   - SSP
+#       * 
+#   - SongData
+#       * init_from
+
+
+
+# REDELIJKE PRIO MAAR SAAI
+#   - Tests
+
+
+
+
+
 # TO DO
 # PRIOTIRTIES
 # - RKBX: BEETS sync
@@ -214,8 +239,11 @@ class MuziekMachine(BeetsPlugin):
         platform_data = pm.pull_data(lib, playlist_name=playlist_str)
         pulled_songs = [item for src in platform_data.values() for lst in src.values() for item in lst]
 
-        # UGLY, FIX NONE VALUES IN PM.PULL_DATA METHOD
+        # UGLY, FIX OCCURANCE OF THIS NONE VALUE UPSTREAM, IN PULL_DATA
         pulled_songs = [song for song in pulled_songs if song]
+
+        print(len(pulled_songs))
+        quit()
 
         # ADD NEW SONGS TO DATABASE
         new_count = sum([self.dbu.add_or_update(lib, song) for song in pulled_songs])

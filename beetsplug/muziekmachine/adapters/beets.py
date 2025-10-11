@@ -1,0 +1,2 @@
+class BeetsAdapter:
+    pass

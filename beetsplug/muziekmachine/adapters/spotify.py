@@ -1,0 +1,2 @@
+class SpotifyAdapter:
+    pass
