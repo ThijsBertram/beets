@@ -1,1 +1,2 @@
-a
+class Diff:
+    pass

@@ -1,2 +1,0 @@
-class YoutubeAdapter:
-    pass
