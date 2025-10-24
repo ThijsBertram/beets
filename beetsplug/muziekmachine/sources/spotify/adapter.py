@@ -15,7 +15,7 @@ class SpotifyAdapter(SourceAdapter):
 
     def make_ref(self, raw: Dict[str, Any]) -> SourceRef:
         track = raw if "track" not in raw else raw["track"]
-        return SourceRef(source="spotify", id=track["id"])
+        return SourceRef(source="spotify", external_id=track["id"])
 
     def render_current(self, raw: Dict[str, Any]) -> Mapping[str, Any]:
         track = raw if "track" not in raw else raw["track"]

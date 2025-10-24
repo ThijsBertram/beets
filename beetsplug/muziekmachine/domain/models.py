@@ -136,20 +136,64 @@ class SongData(BaseModel):
     #         return ''
     
 
-class PlaylistData(BaseModel):
+
+
+
+
+# SongPointer lets playlist membership be source-agnostic: once a song is matched, store the canonical song_id. Before that, keep the SourceRef so we can back-fill later.
+
+
+
+
+
+@dataclass(frozen=True)
+class PlaylistRef:
+    source: SourceName
+    id: Optional[str] = None              # playlist id / crate id / folder id
+    path: Optional[str] = None            # if filesystem-represented playlists exist
+    extra: Optional[Dict[str, Any]] = None
+
+@dataclass(frozen=True)
+class SongPointer:
+    """Reference to a song for membership lists; ideally your canonical song_id, else SourceRef fallback."""
+    song_id: Optional[str] = None         # your canonical id after matching
+    source_ref: Optional[Dict[str, Any]] = None  # e.g., {"source":"spotify","id":"..."} for unresolved
+
+
+
+@dataclass
+class PlaylistData:
     name: str
-    description: Optional[str] = ''
-    path: Optional[str] = ''    
-    rkbx_id: str = ''
-    spotify_id: str = ''
-    youtube_id: str = ''
-    soundcloud_id: Optional[str] = ''
+    description: Optional[str] = None
+    owner: Optional[str] = None           # channel/user/account
+    is_public: Optional[bool] = None
+    # ordered membership:
+    members: List[SongPointer] = None
+    # source ids:
+    spotify_id: Optional[str] = None
+    youtube_id: Optional[str] = None
+    rekordbox_id: Optional[str] = None
+    beets_id: Optional[str] = None
+    filesystem_id: Optional[str] = None
+    # optional: tags, cover art url, etc.
     last_edited_at: str = ''
-    playlist_type: Optional[str] = ''
-    songs: dict = {
-        'youtube':  List[SongData],
-        'spotify': List[SongData],
-        'total': List[SongData],
-        'rkbx': List[SongData],
-        'usb': List[SongData]
-    }
+
+
+
+# class PlaylistData(BaseModel):
+#     name: str
+#     description: Optional[str] = ''
+#     path: Optional[str] = ''    
+#     rkbx_id: str = ''
+#     spotify_id: str = ''
+#     youtube_id: str = ''
+#     soundcloud_id: Optional[str] = ''
+#     last_edited_at: str = ''
+#     playlist_type: Optional[str] = ''
+#     songs: dict = {
+#         'youtube':  List[SongData],
+#         'spotify': List[SongData],
+#         'total': List[SongData],
+#         'rkbx': List[SongData],
+#         'usb': List[SongData]
+#     }

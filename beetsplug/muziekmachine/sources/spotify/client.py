@@ -54,6 +54,7 @@ class SpotifyClient(SourceClient):
         self.api: Optional[spotipy.Spotify] = None
         self.session = None
 
+
     def connect(self) -> None:
 
         if not all(self._cfg.values()):

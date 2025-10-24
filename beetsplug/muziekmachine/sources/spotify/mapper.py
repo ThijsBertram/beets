@@ -13,10 +13,9 @@ class SpotifyMapper:
 
     def to_songdata(self, raw: Dict[str, Any]) -> SongData:
 
+        track = raw['track']
 
-        track = track['track']
-
-         # title
+        # title
         title = track['name'].split(' - ')[0]
 
         # ARTISTS
@@ -42,7 +41,7 @@ class SpotifyMapper:
         # spotify id
         spotify_id = track['id']
 
-        return SongData(
+        songdata = SongData(
             title = title,
             artists = artists,
             main_artist = main_artist,
@@ -51,3 +50,5 @@ class SpotifyMapper:
             feat_artist = feat_artist,
             spotify_id = spotify_id
         )
+
+        return songdata

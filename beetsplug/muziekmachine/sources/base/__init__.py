@@ -32,13 +32,13 @@ class SourceClient(AbstractContextManager, ABC):
         
     def __enter__(self):
         self.connect()
-        return
+        return self
     
-    def __exit__(self):
+    def __exit__(self, exc_type, exc, tb) -> bool:
         try:
             self.close()
-        except Exception:
-            pass
+        finally:
+            return False
     
     # ----------------------------
     # Lifecycle / session handling

@@ -8,6 +8,8 @@ from beetsplug.muziekmachine.sources.spotify.adapter import SpotifyAdapter
 from beetsplug.muziekmachine.sources.spotify.mapper import SpotifyMapper
 # from beetsplug.muziekmachine.services.ingestion import pull_source
 
+from beetsplug.muziekmachine.services.ingestion import pull_source
+
 
 class SpotifyBeetsPlugin(BeetsPlugin):
     """Registers a CLI command to pull Spotify data using the new client+adapter+mapper."""
@@ -16,18 +18,15 @@ class SpotifyBeetsPlugin(BeetsPlugin):
     def __init__(self):
         super().__init__()
 
-        cmd = Subcommand('mm-spotify-pull', help='Pull Spotify playlists and map to SongData')
-        cmd.parser.add_option('--playlist', dest='playlist', help='Playlist name or id to pull (optional)')
-        cmd.func = self._cmd_pull
-        self.commands = [cmd]
-
-        self.client, self.adapter = self._make_client_adapter()
+        self.pull_command = Subcommand('sf-pull', help='Pull Spotify playlists and map to SongData')
+        self.pull_command.parser.add_option('--playlist', dest='playlist', help='Playlist name or id to pull (optional)')
+        self.pull_command.func = self._cmd_pull
+    
+    def commands(self):
+        return [self.pull_command]
 
     def _make_client_adapter(self):
-        cfg = self.config
 
-        print("HOI")
-        print(cfg)
         client = SpotifyClient(
             client_id=self.config['client_id'].get(),
             client_secret=self.config['client_secret'].get(),
@@ -37,13 +36,20 @@ class SpotifyBeetsPlugin(BeetsPlugin):
         return client, adapter
 
     def _cmd_pull(self, lib, opts, args):
-        # with self.client:
-            # count = 0
-            # for sd, ref in pull_source(self.client, self.adapter, playlist=opts.playlist):
-            #     # For now, just log a summary; later you’ll pass these into Matching/Merging/Sync.
-            #     self._log.info(u"[Spotify] %s — %s (id=%s)", sd.main_artist or "", sd.title, ref.id)
-            #     count += 1
-            # self._log.info("Pulled %d Spotify tracks.", count)
-            # print('hoi')
+        self.pull(opts)
+        return
+
+    def pull(self, opts):
+        client, adapter = self._make_client_adapter()
+
+        with client:
+            count = 0
+            for sd, ref in pull_source(client, adapter, playlist=opts.playlist):
+                # For now, just log a summary; later you’ll pass these into Matching/Merging/Sync.
+                self._log.info(f"[Spotify] {sd.main_artist} — {sd.title} (id={sd.spotify_id})")
+                count += 1
+            self._log.info("Pulled %d Spotify tracks.", count)
+            print('hoi')
 
         print('hoi spotify')
+        return
