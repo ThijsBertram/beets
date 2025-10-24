@@ -2,7 +2,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict
 
-from beetsplug.muziekmachine.domain.models import SongData
+from beetsplug.muziekmachine.domain.models import SongData, PlaylistData
 
 
 # TO DO: 
@@ -10,6 +10,11 @@ from beetsplug.muziekmachine.domain.models import SongData
 
 
 class SpotifyMapper:
+
+
+    # TODO: implement to_playlistdata
+    def to_playlistdata(self, raw: Dict[str, Any]) -> PlaylistData:
+        return
 
     def to_songdata(self, raw: Dict[str, Any]) -> SongData:
 

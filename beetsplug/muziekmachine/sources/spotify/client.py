@@ -6,7 +6,7 @@ import requests
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 
-from beetsplug.muziekmachine.sources.base import SourceClient, RetryPolicy
+from beetsplug.muziekmachine.sources.base.client import SourceClient, RetryPolicy
 from beetsplug.muziekmachine.sources.base.errors import *
 from beetsplug.muziekmachine.domain.models import SourceRef
 

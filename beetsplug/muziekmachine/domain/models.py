@@ -149,7 +149,7 @@ class SongData(BaseModel):
 @dataclass(frozen=True)
 class PlaylistRef:
     source: SourceName
-    id: Optional[str] = None              # playlist id / crate id / folder id
+    playlist_id: Optional[str] = None              # playlist id / crate id / folder id
     path: Optional[str] = None            # if filesystem-represented playlists exist
     extra: Optional[Dict[str, Any]] = None
 

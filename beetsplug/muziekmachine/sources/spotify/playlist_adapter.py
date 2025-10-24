@@ -3,6 +3,8 @@ from typing import Any, Dict, List, Mapping, Optional
 from adapters.playlist_base import PlaylistAdapter
 from domain.models import PlaylistData, PlaylistRef, SongPointer
 
+# TODO: CHECK THIS PLAYLIST ADAPTER 
+
 class SpotifyPlaylistAdapter(PlaylistAdapter):
     source = "spotify"
 
