@@ -4,8 +4,8 @@ from contextlib import contextmanager, AbstractContextManager
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Iterator, Optional, Tuple, Mapping
 
-from domain.diffs import Diff
-from domain.models import SourceRef
+from beetsplug.muziekmachine.domain.diffs import Diff
+from beetsplug.muziekmachine.domain.models import SourceRef
 
 
 @dataclass(frozen=True)
@@ -36,7 +36,7 @@ class SourceClient(AbstractContextManager, ABC):
     
     def __exit__(self):
         try:
-            self.clolse()
+            self.close()
         except Exception:
             pass
     
@@ -69,11 +69,11 @@ class SourceClient(AbstractContextManager, ABC):
     # ----------------------
 
     @abstractmethod
-    def iter_collection(self) -> Iterable[Any]:
+    def iter_collections(self) -> Iterable[Any]:
         return
     
     @abstractmethod
-    def iter_item(self) -> Iterable[Any]:
+    def iter_items(self) -> Iterable[Any]:
         return
     
     @abstractmethod
