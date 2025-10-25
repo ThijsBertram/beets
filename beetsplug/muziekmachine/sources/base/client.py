@@ -5,8 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Iterator, Optional, Tuple, Mapping
 
 from beetsplug.muziekmachine.domain.diffs import Diff
-from beetsplug.muziekmachine.domain.models import SourceRef
-
+from beetsplug.muziekmachine.domain.models import SourceRef, CollectionStub
 
 @dataclass(frozen=True)
 class RetryPolicy:
@@ -36,6 +35,9 @@ class SourceClient(AbstractContextManager, ABC):
             self.close()
         finally:
             return False
+        
+    def supports_global_items(self) -> bool:
+        return False
     
     # ----------------------------
     # Lifecycle / session handling
@@ -66,11 +68,11 @@ class SourceClient(AbstractContextManager, ABC):
     # ----------------------
 
     @abstractmethod
-    def iter_collections(self) -> Iterable[Any]:
+    def iter_collections(self) -> Iterable[CollectionStub]:
         return
     
     @abstractmethod
-    def iter_items(self) -> Iterable[Any]:
+    def iter_items(self, collection: CollectionStub | None = None) -> Iterable[Any]:
         return
     
     @abstractmethod
@@ -78,10 +80,13 @@ class SourceClient(AbstractContextManager, ABC):
         return
     
     @abstractmethod
-    def iter_items_in_collection(self) -> Iterable[Any]:
+    def iter_items_in_collection(self, coll) -> Iterable[Any]:
         return
 
     
+    def iter_items_global(self) -> Iterable[Any]:
+        for coll in self.iter_collections():
+            yield from self.iter_items_in_collection(coll)
 
     # ---------------
     # Write / apply

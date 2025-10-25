@@ -8,7 +8,7 @@ from spotipy.oauth2 import SpotifyOAuth
 
 from beetsplug.muziekmachine.sources.base.client import SourceClient, RetryPolicy
 from beetsplug.muziekmachine.sources.base.errors import *
-from beetsplug.muziekmachine.domain.models import SourceRef
+from beetsplug.muziekmachine.domain.models import SourceRef, CollectionStub
 
 
 
@@ -91,7 +91,7 @@ class SpotifyClient(SourceClient):
     def capabilities(self) -> None:
         return
     
-    def iter_collections(self, **kwargs) -> Iterable[Dict[str, Any]]:
+    def iter_collections(self, **kwargs) -> Iterable[CollectionStub]:
         """
 
 
@@ -109,13 +109,13 @@ class SpotifyClient(SourceClient):
                 page = self.api.current_user_playlists(limit=limit, offset=offset)
 
                 for p in page["items"]:
-                    yield {
-                        "playlist_id": p["id"],
-                        "playlist_name": p["name"],
-                        "playlist_description": p.get("description") or "",
-                        "snapshot_id": p.get("snapshot_id")
-                    }
-
+                    yield CollectionStub(
+                        id=p["id"],
+                        name=p["name"],
+                        raw=p["raw"],
+                        description=p.get("description") or ""
+                    )
+                    
                 if not page.get("next"):
                     break
                     
@@ -123,7 +123,7 @@ class SpotifyClient(SourceClient):
             except Exception as e:
                 raise ClientRequestError(str(e)) from e 
     
-    def iter_items(self, collection: Mapping[str, Any], **kwargs):
+    def iter_items(self, collection: CollectionStub | None = None, **kwargs):
         """ Iterates over all spotify TRACKS within a spotify PLAYLIST
 
         Args:
@@ -131,7 +131,13 @@ class SpotifyClient(SourceClient):
         """
         assert self.api is not None, "SpotifyClient not connected"
 
-        playlist_id = collection["playlist_id"]
+        if not collection:
+            for coll in self.iter_collections():
+                yield from self.iter_items(coll, **kwargs)
+            return
+
+
+        playlist_id = collection.id
         limit = kwargs.get("limit", 100)
         offset = kwargs.get("offset", 0)
 
@@ -166,3 +172,7 @@ class SpotifyClient(SourceClient):
     # write (patch) — not supported now
     def apply(self, ref: SourceRef, diff, **kwargs) -> None:
         raise ClientCapabilityError("Spotify is read-only in this pipeline.")
+    
+    def iter_items_in_collection(self, collection: CollectionStub | None = None):
+        raise NotImplementedError("Not implemented yet")
+    

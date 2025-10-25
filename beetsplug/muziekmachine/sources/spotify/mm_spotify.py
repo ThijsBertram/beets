@@ -49,7 +49,5 @@ class SpotifyBeetsPlugin(BeetsPlugin):
                 self._log.info(f"[Spotify] {sd.main_artist} — {sd.title} (id={sd.spotify_id})")
                 count += 1
             self._log.info("Pulled %d Spotify tracks.", count)
-            print('hoi')
 
-        print('hoi spotify')
         return

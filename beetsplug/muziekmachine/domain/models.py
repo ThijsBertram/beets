@@ -55,33 +55,38 @@ class SourceRef:
         return SourceRef(source="string")
     
 
-
+@dataclass(frozen=True)
+class CollectionStub:
+    id: str
+    name: str
+    raw: Dict[str, Any]
+    description: Optional[str] = ''
 
 
 class SongData(BaseModel):
     title: str
-    path: Optional[str] = ''
+    path: Optional[str | None] = ''
     main_artist: str
     artists: Tuple = ()
     genre: str = ''
-    subgenre: str = ''
-    remixer: str = ''
-    remix_type: str = ''
-    last_edited_ISO: str = datetime.datetime.now().isoformat()
+    subgenre: Optional[str] = ''
+    remixer: Optional[str] = ''
+    remix_type: Optional[str] = ''
+    last_edited_ISO: Optional[str] = datetime.datetime.now().isoformat()
     # PLATFORMS
-    youtube_id: str = ''
-    spotify_id: str = ''
-    soundcloud_id: str = ''
+    youtube_id: Optional[str] = ''
+    spotify_id: Optional[str] = ''
+    soundcloud_id: Optional[str] = ''
     #PLAYLIST
-    playlist: dict = {}
+    playlist: Optional[dict] = {}
     # REKORDBOX
-    rekordbox_id: str = ''
-    rekordbox_path: str = ''
-    rekordbox_bpm: float = None
-    rekordbox_tonality: str = ''
-    rekordbox_comments: str = ''
-    rekordbox_rating: str = ''
-    rekordbox_cateogry: str = ''
+    rekordbox_id: Optional[str] = ''
+    rekordbox_path: Optional[str] = ''
+    rekordbox_bpm: Optional[float] = None
+    rekordbox_tonality: Optional[str] = ''
+    rekordbox_comments: Optional[str] = ''
+    rekordbox_rating: Optional[str] = ''
+    rekordbox_cateogry: Optional[str] = ''
 
 
     @classmethod

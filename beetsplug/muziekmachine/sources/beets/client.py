@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Any, Dict, Iterable, Mapping, Optional
 
-from beetsplug.muziekmachine.sources.base import SourceClient, RetryPolicy
+from beetsplug.muziekmachine.sources.base.client import SourceClient, RetryPolicy
 from beetsplug.muziekmachine.sources.base.errors import (
     ClientConfigError, ClientNotFoundError, ClientCapabilityError
 )
@@ -13,7 +13,7 @@ from pathlib import Path
 import sqlite3
 
 
-from beetsplug.muziekmachine.domain.models import SourceRef, PlaylistRef
+from beetsplug.muziekmachine.domain.models import SourceRef, PlaylistRef, CollectionStub
 from beetsplug.muziekmachine.domain.diffs import Diff
 
 
@@ -32,22 +32,28 @@ class BeetsClient(SourceClient):
     def __init__(self, *, lib, retry_policy: Optional[RetryPolicy] = None) -> None:
         super().__init__(retry_policy=retry_policy)
         self.lib = lib
-        self.db = lib._db
 
     # lifecycle (mostly no-op)
     def connect(self) -> None:
-        if self.lib is None:
-            raise ClientConfigError("BeetsClient requires a beets Library instance.")    
+        if not isinstance(self.lib, Library):
+            raise ClientConfigError("BeetsClient requires a beets Library instance.")
 
     def close(self) -> None:
         return
+              
+    def supports_global_items(self):
+        return True
     
     def capabilities(self) -> set[str]:
         # You can safely write many fields; keep this explicit and adjustable.
         return BEETS_CAPABILITIES
     
-    def iter_items(self) -> Iterable[Item]:
-        yield from self.lib.items()
+    def iter_items(self, collection: CollectionStub | None = None) -> Iterable[Item]:
+        
+        if collection:
+            yield from self.iter_items_in_collection(collection)
+        else:
+            yield from self.lib.items()
 
     def get_item(self, ref: SourceRef, **kwargs) -> Item:
 
@@ -88,18 +94,27 @@ class BeetsClient(SourceClient):
 
         return
 
-    def iter_collections(self, **kwargs) -> Iterable[Dict[str, Any]]:
-        cur = self._db._connectoin().execute('SELECT * FROM playlists ORDER BY name ASC')
+    def iter_collections(self, **kwargs) -> Iterable[CollectionStub]:
+        
+        conn = self.lib._connection()
+        cur = conn.execute('SELECT * from playlist ORDER BY name ASC')
         cols = [d[0] for d in cur.description]
 
         for row in cur.fetchall():
-            yield dict(zip(cols, row))
+            row = dict(zip(cols, row))
+            yield CollectionStub(
+                id=str(row["id"]),
+                name=row["name"],
+                description=row.get('description') or '',
+                raw=row
+            )
         
     def get_collection(self, ref: PlaylistRef, **kwargs) -> Dict[str, Any]:
         if ref.source != 'beets' or not ref.playlist_id:
             raise ClientConfigError("Beets get_collection requires PlaylistRef(source='beets', id=<id>)")
     
-        cur = self._db._connection().execute('SELECT * FROM playlists WHERE id=?', (ref.playlist_id))
+        conn = self.lib._connection()
+        cur = conn.execute('SELECT * from playlist WHERE id=?', (ref.playlist_id))
         row = cur.fetchone()
 
         if not row:
@@ -109,36 +124,25 @@ class BeetsClient(SourceClient):
 
         return dict(zip(cols, row))
 
-    def iter_collections(self):
-# Your schema: playlists(id, name, description, spotify_id, soundcloud_id, youtube_id, rekordbox_id, path, last_edited_at, type)
-        rows = self.db._connection.execute("SELECT id, name, description, type, last_edited_at FROM playlists")
-        for row in rows:
-            yield {
-                "playlist_id": row["id"],
-                "playlist_name": row["name"],
-                "playlist_description": row["description"],
-                "type": row["type"],
-                "last_edited_at": row["last_edited_at"],
-            }
-
-
-        return
     
-    def iter_items_in_collection(self, playlist_row: Mapping[str, Any], **kwargs) -> Iterable[Item]:
-        playlist_id = playlist_row['playlist_id']
+    def iter_items_in_collection(self, collection: CollectionStub, **kwargs) -> Iterable[Item]:
+        playlist_id = collection.id
 
         sql = '''
-        SELECT i.* from items i
+        SELECT i.id from items i
         JOIN playlist_item pi on pi.item_id = i.id
         WHERE pi.playlist_id = ?
-        ORDER BY pi.position ASC
         '''
 
-        for it in self.lib._db.query(sql, (playlist_id,)):
-            yield self.lib.get_item(it['id'])
+        conn = self.lib._connection()
 
+        for (item_id,) in conn.execute(sql, (playlist_id,)):
+            item = self.lib.get_item(int(item_id))
+            if item:
+                yield item
 
-
+    def iter_items_global(self) -> Iterable[Any]:
+        yield from self.lib.items()
 
     # ==================
     # CRUD PLAYLISTS
@@ -213,5 +217,5 @@ class BeetsClient(SourceClient):
     # def delete_playlist(self, pref: PlaylistRef) -> None:
     #     conn = self._db._connection()
     #     conn.execute("DELETE FROM playlist_item WHERE playlist_id=?", (pref.id,))
-    #     conn.execute("DELETE FROM playlists WHERE id=?", (pref.id,))
+    #     conn.execute("DELETE from playlist WHERE id=?", (pref.id,))
     #     conn.commit()

@@ -47,7 +47,8 @@ class SourceAdapter(ABC):
         try:
             return self.mapper.to_songdata(raw)
         except Exception as e:
-            raise MappingError(f"{self.source}: failed to map raw -> SongData") from e
+            print(dict(raw))
+            raise MappingError(f"{self.source}: failed to map raw -> SongData for raw info:\n{raw}") from e
 
     @abstractmethod
     def render_desired(self, songdata: Any, ref: Optional[SourceRef] = None) -> Mapping[str, Any]:

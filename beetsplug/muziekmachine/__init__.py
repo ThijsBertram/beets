@@ -5,6 +5,22 @@ from beets import config
 # from beetsplug.muziekmachine.sources.spotify.adapter import SpotifyAdapter
 # from beetsplug.muziekmachine.sources.spotify.mm_spotify import SpotifyBeetsPlugin
 from beetsplug.muziekmachine.sources.spotify.mm_spotify import SpotifyBeetsPlugin
+from beetsplug.muziekmachine.sources.beets.mm_beets import BeetsBeetsPlugin
+
+
+#TODO: - ask chappie about adapters and their usage (rendering, capabilities)
+#TODO: - ask chappie about playlist_adapter. Why not fold it into adapter class (like with mapper)
+#todo                   - or at least in same adapter.py file?
+
+#TODO: - CHANGE RENDER_CURRENT IN ADAPTERS TO ACTUALLY RENDER RELEVANT STUFF (THAT IS IN SONGDATA)
+#TODO: - GET DEFINITION OF CAPABILITIES IN ADAPTERS FROM CONFIG (INSTEAD OF HARDCODED) 
+#TODO: - REFACTOR:
+#TODO:      - BEETS 
+#TODO:      - SPOTIFY (PLAYLISTS)
+#TODO:      - YOUTUBE
+#TODO:      - REKORDBOX
+
+
 
 
 class MuziekMachine(BeetsPlugin):
@@ -29,9 +45,11 @@ class MuziekMachine(BeetsPlugin):
         # PLUGINS
         # ===================================
         self.spotify = SpotifyBeetsPlugin()
+        self.beets = BeetsBeetsPlugin()
 
         self.sources = {
-            'spotify': self.spotify
+            'spotify': self.spotify,
+            'all': [self.spotify]
         }
 
 
@@ -50,6 +68,8 @@ class MuziekMachine(BeetsPlugin):
         if platform not in self.sources.keys():
             raise 'not a valid platform'
         
+        print(platform)
+        quit()
         
 
         self.spotify.pull(opts)
