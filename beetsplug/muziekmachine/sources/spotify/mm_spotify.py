@@ -48,6 +48,6 @@ class SpotifyBeetsPlugin(BeetsPlugin):
                 # For now, just log a summary; later you’ll pass these into Matching/Merging/Sync.
                 self._log.info(f"[Spotify] {sd.main_artist} — {sd.title} (id={sd.spotify_id})")
                 count += 1
-            self._log.info("Pulled %d Spotify tracks.", count)
+            self._log.info(f"Pulled {count} Spotify tracks.")
 
         return

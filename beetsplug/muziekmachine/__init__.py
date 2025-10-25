@@ -7,16 +7,21 @@ from beets import config
 from beetsplug.muziekmachine.sources.spotify.mm_spotify import SpotifyBeetsPlugin
 from beetsplug.muziekmachine.sources.beets.mm_beets import BeetsBeetsPlugin
 
+# TODO: - API CLIENT THROTTLING AND LIMITING
+#           - use raw where possible?
+#           - caching?
+#           - limiting with availiable requests?
 
-#TODO: - ask chappie about adapters and their usage (rendering, capabilities)
-#TODO: - ask chappie about playlist_adapter. Why not fold it into adapter class (like with mapper)
-#todo                   - or at least in same adapter.py file?
 
 #TODO: - CHANGE RENDER_CURRENT IN ADAPTERS TO ACTUALLY RENDER RELEVANT STUFF (THAT IS IN SONGDATA)
 #TODO: - GET DEFINITION OF CAPABILITIES IN ADAPTERS FROM CONFIG (INSTEAD OF HARDCODED) 
 #TODO: - REFACTOR:
 #TODO:      - BEETS 
-#TODO:      - SPOTIFY (PLAYLISTS)
+#TODO:          - PLAYLISTS (DONE)
+#TODO:          - ITEMS (DONE)
+#TODO:      - SPOTIFY
+#TODO:          - PLAYLISTS
+#TODO:          - ITEMS (DONE)
 #TODO:      - YOUTUBE
 #TODO:      - REKORDBOX
 

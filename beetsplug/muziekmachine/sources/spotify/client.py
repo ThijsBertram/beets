@@ -112,7 +112,7 @@ class SpotifyClient(SourceClient):
                     yield CollectionStub(
                         id=p["id"],
                         name=p["name"],
-                        raw=p["raw"],
+                        raw=p,
                         description=p.get("description") or ""
                     )
                     
