@@ -6,11 +6,14 @@ from beets import config
 # from beetsplug.muziekmachine.sources.spotify.mm_spotify import SpotifyBeetsPlugin
 from beetsplug.muziekmachine.sources.spotify.mm_spotify import SpotifyBeetsPlugin
 from beetsplug.muziekmachine.sources.beets.mm_beets import BeetsBeetsPlugin
-
+from beetsplug.muziekmachine.sources.youtube.mm_youtube import YoutubeBeetsPlugin
 
 # TODO
+#   - PARSING FROM SONG STRINGS
 #   - YOUTUBE PULL SONGS
+#       * implmement parsing of string titles
 #   - YOUTUBE PULL PLAYLISTS
+#       * 
 #   - REKORDBOX PULL SONGS
 #   - REKORDBOX PULL PLAYLISTS
 #   - FILESYSTEM PULL SONGS
@@ -20,6 +23,8 @@ from beetsplug.muziekmachine.sources.beets.mm_beets import BeetsBeetsPlugin
 #   - SYNCING
 #   - DOWNLOADING
 
+# TODO: - CLIENT ROBUSTNESS
+
 # TODO: - PLAYLIST FUNCTIONALITY
 #           PREREQS
                 # - add is_public column to playlist tablei n beets
@@ -27,11 +32,13 @@ from beetsplug.muziekmachine.sources.beets.mm_beets import BeetsBeetsPlugin
                 # - update _make_client_adapter() to also return playlist_adapter
 
 
-# TODO: - API CLIENT THROTTLING AND LIMITING
+# TODO: -  CLIENT ROBUSTNESS
+#       - RATE LIMITING & THROTTLING
 #           - use raw where possible?
 #           - caching?
 #           - limiting with availiable requests?
-
+#       - CREDENTIAL REFRESHING
+#           - implement generic way to refresh creds
 
 # TODO: - DIFFING / MATCHING / MERGING
 #           - change render_current fields (put in config?)
@@ -63,6 +70,7 @@ class MuziekMachine(BeetsPlugin):
         # ===================================
         self.spotify = SpotifyBeetsPlugin()
         self.beets = BeetsBeetsPlugin()
+        self.youtube = YoutubeBeetsPlugin()
 
         self.sources = {
             'spotify': self.spotify,
