@@ -8,12 +8,23 @@ from beetsplug.muziekmachine.sources.spotify.mm_spotify import SpotifyBeetsPlugi
 from beetsplug.muziekmachine.sources.beets.mm_beets import BeetsBeetsPlugin
 
 
-# TODO: - ADD PLAYLIST FUNCTIONALITY
+# TODO
+#   - YOUTUBE PULL SONGS
+#   - YOUTUBE PULL PLAYLISTS
+#   - REKORDBOX PULL SONGS
+#   - REKORDBOX PULL PLAYLISTS
+#   - FILESYSTEM PULL SONGS
+#   - FILESYSTEM PULL PLAYLISTS
+#   - MATCHING
+#   - DIFFING 
+#   - SYNCING
+#   - DOWNLOADING
+
+# TODO: - PLAYLIST FUNCTIONALITY
 #           PREREQS
                 # - add is_public column to playlist tablei n beets
                 # - create way to add raw_items to playlistData when initializing
                 # - update _make_client_adapter() to also return playlist_adapter
-#           - add playlist_adatper for every source
 
 
 # TODO: - API CLIENT THROTTLING AND LIMITING
@@ -22,17 +33,9 @@ from beetsplug.muziekmachine.sources.beets.mm_beets import BeetsBeetsPlugin
 #           - limiting with availiable requests?
 
 
-#TODO: - CHANGE RENDER_CURRENT IN ADAPTERS TO ACTUALLY RENDER RELEVANT STUFF (THAT IS IN SONGDATA)
-#TODO: - GET DEFINITION OF CAPABILITIES IN ADAPTERS FROM CONFIG (INSTEAD OF HARDCODED) 
-#TODO: - REFACTOR:
-#TODO:      - BEETS 
-#TODO:          - PLAYLISTS (DONE)
-#TODO:          - ITEMS (DONE)
-#TODO:      - SPOTIFY
-#TODO:          - PLAYLISTS
-#TODO:          - ITEMS (DONE)
-#TODO:      - YOUTUBE
-#TODO:      - REKORDBOX
+# TODO: - DIFFING / MATCHING / MERGING
+#           - change render_current fields (put in config?)
+#           - change capabilities for every source (put in config?)
 
 
 
