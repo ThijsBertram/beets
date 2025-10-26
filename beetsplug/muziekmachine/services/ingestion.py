@@ -4,7 +4,7 @@ from beetsplug.muziekmachine.domain.models import SourceRef
 from beetsplug.muziekmachine.sources.base.errors import *
 from beetsplug.muziekmachine.sources.base.adapter import *
 
-def pull_source(client, adapter, *, playlist: Optional[Sequence[str]]) -> Iterable[Tuple[Any, SourceRef]]:
+def pull_source(client, adapter, *, playlist: Optional[str]) -> Iterable[Tuple[Any, SourceRef]]:
     """
     Iterate a source (Spotify) and yield (SongData, SourceRef) pairs.
     If `playlist` is provided, match by name or id.
@@ -18,10 +18,15 @@ def pull_source(client, adapter, *, playlist: Optional[Sequence[str]]) -> Iterab
             print(f'UNABLE TO PARSE ENTRY:\n{raw}\n')
             return None, None
         return songdata, ref
+    
+    # # RETURN ONLY COLLECTION IF return_collection is true
+    # if return_collection:
+    #     client.get_collection()
+
         
     # FETCH ITEMS FOR SPECIFIC PLAYLISTS / COLLECTIONS
     if playlist:
-        wanted = playlist.split(',')
+        wanted = playlist
 
         for coll in client.iter_collections():
             if coll.id in wanted or coll.name in wanted:

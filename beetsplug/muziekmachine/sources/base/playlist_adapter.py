@@ -1,11 +1,20 @@
 # adapters/playlist_base.py
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Mapping, Optional
-from domain.models import PlaylistData, PlaylistRef
-from domain.playlist_diffs import compute_field_diff, compute_membership_diff, FieldDiff, MembershipDiff
+from beetsplug.muziekmachine.domain.models import PlaylistData, PlaylistRef
+from beetsplug.muziekmachine.domain.playlist_diffs import compute_field_diff, compute_membership_diff, FieldDiff, MembershipDiff
 
 class PlaylistAdapter(ABC):
     source: str
+
+
+    @abstractmethod
+    def collection_id(self, raw_playlist: Dict[str, Any]) -> str:
+        return
+    
+    @abstractmethod
+    def collection_name(self, raw_playlist: Dict[str, Any]) -> str:
+        return
 
     @abstractmethod
     def make_ref(self, raw_playlist: Any) -> PlaylistRef:

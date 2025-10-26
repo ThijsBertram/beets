@@ -1,15 +1,39 @@
 # sources/spotify/playlist_adapter.py
 from typing import Any, Dict, List, Mapping, Optional
-from adapters.playlist_base import PlaylistAdapter
-from domain.models import PlaylistData, PlaylistRef, SongPointer
+from beetsplug.muziekmachine.sources.base.playlist_adapter import PlaylistAdapter
+from beetsplug.muziekmachine.domain.models import PlaylistData, PlaylistRef, SongPointer, CollectionStub
+from beetsplug.muziekmachine.sources.spotify.playlist_mapper import SpotifyPlaylistMapper
 
 # TODO: CHECK THIS PLAYLIST ADAPTER 
 
 class SpotifyPlaylistAdapter(PlaylistAdapter):
     source = "spotify"
 
-    def make_ref(self, raw_playlist: Dict[str, Any]) -> PlaylistRef:
-        return PlaylistRef(source="spotify", id=raw_playlist["playlist_id"])
+    # ================
+    # IDENTITY
+    # ================
+
+    def collection_id(self, stub: CollectionStub) -> str:
+        return stub.id
+    
+    def collection_name(self, stub: CollectionStub) -> str:
+        return stub.name
+
+    def make_ref(self, stub: CollectionStub) -> PlaylistRef:
+        return PlaylistRef(source="spotify", playlist_id=stub.id)
+
+    # ================
+    # TO PLAYLISTDATA
+    # ================
+
+    def to_playlistdata(self, stub: CollectionStub, raw_items=None) -> PlaylistData:
+        mapper = SpotifyPlaylistMapper()
+        playlist_data = mapper.to_playlistdata(stub=stub)
+        return playlist_data
+
+    # ================
+    # RENDERING
+    # ================
 
     def render_current_fields(self, raw_playlist: Dict[str, Any]) -> Mapping[str, Any]:
         return {

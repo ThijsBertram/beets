@@ -182,7 +182,7 @@ class PlaylistData:
     filesystem_id: Optional[str] = None
     # optional: tags, cover art url, etc.
     last_edited_at: str = ''
-
+    playlist_type: str = ''
 
 
 # class PlaylistData(BaseModel):

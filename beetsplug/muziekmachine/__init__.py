@@ -7,6 +7,15 @@ from beets import config
 from beetsplug.muziekmachine.sources.spotify.mm_spotify import SpotifyBeetsPlugin
 from beetsplug.muziekmachine.sources.beets.mm_beets import BeetsBeetsPlugin
 
+
+# TODO: - ADD PLAYLIST FUNCTIONALITY
+#           PREREQS
+                # - add is_public column to playlist tablei n beets
+                # - create way to add raw_items to playlistData when initializing
+                # - update _make_client_adapter() to also return playlist_adapter
+#           - add playlist_adatper for every source
+
+
 # TODO: - API CLIENT THROTTLING AND LIMITING
 #           - use raw where possible?
 #           - caching?

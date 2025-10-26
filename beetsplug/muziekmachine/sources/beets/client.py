@@ -109,7 +109,7 @@ class BeetsClient(SourceClient):
                 raw=row
             )
         
-    def get_collection(self, ref: PlaylistRef, **kwargs) -> Dict[str, Any]:
+    def get_collection(self, ref: PlaylistRef, **kwargs) -> Iterable[CollectionStub]:
         if ref.source != 'beets' or not ref.playlist_id:
             raise ClientConfigError("Beets get_collection requires PlaylistRef(source='beets', id=<id>)")
     
@@ -122,7 +122,16 @@ class BeetsClient(SourceClient):
 
         cols = [d[0] for d in cur.description]
 
-        return dict(zip(cols, row))
+        collection_dict = dict(zip(cols, row))
+
+        print(collection_dict)
+
+        yield CollectionStub(
+            id=str(collection_dict["id"]),
+            name=collection_dict["name"],
+            description=collection_dict.get("description", ""),
+            raw=collection_dict
+        )
 
     
     def iter_items_in_collection(self, collection: CollectionStub, **kwargs) -> Iterable[Item]:

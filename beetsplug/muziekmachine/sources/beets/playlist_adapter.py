@@ -3,7 +3,8 @@ from typing import Any, Dict, List, Mapping, Optional
 
 from beetsplug.muziekmachine.sources.base.playlist_adapter import PlaylistAdapter
 from beetsplug.muziekmachine.sources.beets.mapper import BeetsMapper
-from beetsplug.muziekmachine.domain.models import PlaylistData, PlaylistRef
+from beetsplug.muziekmachine.sources.beets.playlist_mapper import BeetsPlaylistMapper
+from beetsplug.muziekmachine.domain.models import PlaylistData, PlaylistRef, CollectionStub
 
 
 class BeetsPlaylistAdapter(PlaylistAdapter):
@@ -13,8 +14,31 @@ class BeetsPlaylistAdapter(PlaylistAdapter):
         self.client = client
         self.mapper = mapper or BeetsMapper()
 
+    # ================
+    # IDENTITY
+    # ================
+    def collection_id(self, row: Dict[str, Any]) -> str:
+        return str(row.get("id"))
+    
+    def collection_name(self, row: Dict[str, Any]) -> str:
+        return str(row.get("name"))
+    
     def make_ref(self, row: Dict[str, Any]) -> PlaylistRef:
         return PlaylistRef(source="beets", id=str(row["id"]))
+    
+
+    # ================
+    # TO PLAYLISTDATA
+    # ================
+
+    def to_playlistdata(self, stub: CollectionStub, raw_items=None) -> PlaylistData:
+        mapper = BeetsPlaylistMapper()
+        playlist_data = mapper.to_playlistdata(stub=stub, raw_items=raw_items)
+        return playlist_data
+
+    # ================
+    # RENDERING
+    # ================
 
     def render_current_fields(self, row: Dict[str, Any]) -> Mapping[str, Any]:
         return {
