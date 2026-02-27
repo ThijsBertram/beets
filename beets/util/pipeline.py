@@ -31,14 +31,24 @@ To do so, pass an iterable of coroutines to the Pipeline constructor
 in place of any single coroutine.
 """
 
+from __future__ import annotations
+
 import queue
 import sys
 from threading import Lock, Thread
+from typing import TYPE_CHECKING, TypeVar
+
+from typing_extensions import TypeVarTuple, Unpack
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Generator
 
 BUBBLE = "__PIPELINE_BUBBLE__"
 POISON = "__PIPELINE_POISON__"
 
 DEFAULT_QUEUE_SIZE = 16
+
+Tq = TypeVar("Tq")
 
 
 def _invalidate_queue(q, val=None, sync=True):
@@ -83,7 +93,7 @@ def _invalidate_queue(q, val=None, sync=True):
             q.mutex.release()
 
 
-class CountedQueue(queue.Queue):
+class CountedQueue(queue.Queue[Tq]):
     """A queue that keeps track of the number of threads that are
     still feeding into it. The queue is poisoned when all threads are
     finished with the queue.
@@ -149,7 +159,22 @@ def multiple(messages):
     return MultiMessage(messages)
 
 
-def stage(func):
+A = TypeVarTuple("A")  # Arguments of a function (omitting the task)
+T = TypeVar("T")  # Type of the task
+# Normally these are concatenated i.e. (*args, task)
+
+# Return type of the function (should normally be task but sadly
+# we cant enforce this with the current stage functions without
+# a refactor)
+R = TypeVar("R")
+
+
+def stage(
+    func: Callable[
+        [Unpack[A], T],
+        R | None,
+    ],
+):
     """Decorate a function to become a simple stage.
 
     >>> @stage
@@ -163,16 +188,16 @@ def stage(func):
     [3, 4, 5]
     """
 
-    def coro(*args):
-        task = None
+    def coro(*args: Unpack[A]) -> Generator[R | T | None, T, None]:
+        task: R | T | None = None
         while True:
             task = yield task
-            task = func(*(args + (task,)))
+            task = func(*args, task)
 
     return coro
 
 
-def mutator_stage(func):
+def mutator_stage(func: Callable[[Unpack[A], T], R]):
     """Decorate a function that manipulates items in a coroutine to
     become a simple stage.
 
@@ -187,11 +212,11 @@ def mutator_stage(func):
     [{'x': True}, {'a': False, 'x': True}]
     """
 
-    def coro(*args):
+    def coro(*args: Unpack[A]) -> Generator[T | None, T, None]:
         task = None
         while True:
             task = yield task
-            func(*(args + (task,)))
+            func(*args, task)
 
     return coro
 
@@ -469,64 +494,3 @@ class Pipeline:
                 msgs = next_msgs
             for msg in msgs:
                 yield msg
-
-
-# Smoke test.
-if __name__ == "__main__":
-    import time
-
-    # Test a normally-terminating pipeline both in sequence and
-    # in parallel.
-    def produce():
-        for i in range(5):
-            print("generating %i" % i)
-            time.sleep(1)
-            yield i
-
-    def work():
-        num = yield
-        while True:
-            print("processing %i" % num)
-            time.sleep(2)
-            num = yield num * 2
-
-    def consume():
-        while True:
-            num = yield
-            time.sleep(1)
-            print("received %i" % num)
-
-    ts_start = time.time()
-    Pipeline([produce(), work(), consume()]).run_sequential()
-    ts_seq = time.time()
-    Pipeline([produce(), work(), consume()]).run_parallel()
-    ts_par = time.time()
-    Pipeline([produce(), (work(), work()), consume()]).run_parallel()
-    ts_end = time.time()
-    print("Sequential time:", ts_seq - ts_start)
-    print("Parallel time:", ts_par - ts_seq)
-    print("Multiply-parallel time:", ts_end - ts_par)
-    print()
-
-    # Test a pipeline that raises an exception.
-    def exc_produce():
-        for i in range(10):
-            print("generating %i" % i)
-            time.sleep(1)
-            yield i
-
-    def exc_work():
-        num = yield
-        while True:
-            print("processing %i" % num)
-            time.sleep(3)
-            if num == 3:
-                raise Exception()
-            num = yield num * 2
-
-    def exc_consume():
-        while True:
-            num = yield
-            print("received %i" % num)
-
-    Pipeline([exc_produce(), exc_work(), exc_consume()]).run_parallel(1)

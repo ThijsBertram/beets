@@ -13,6 +13,7 @@
 # included in all copies or substantial portions of the Software.
 
 
+import os
 import os.path
 import shutil
 import tempfile
@@ -22,11 +23,18 @@ from unittest.mock import MagicMock, patch
 import pytest
 from mediafile import MediaFile
 
-from beets import art, config, logging, ui
+from beets import config, logging, ui
 from beets.test import _common
-from beets.test.helper import BeetsTestCase, FetchImageHelper, PluginMixin
+from beets.test.helper import (
+    BeetsTestCase,
+    FetchImageHelper,
+    ImportHelper,
+    IOMixin,
+    PluginMixin,
+)
 from beets.util import bytestring_path, displayable_path, syspath
 from beets.util.artresizer import ArtResizer
+from beetsplug._utils import art
 from test.test_art_resize import DummyIMBackend
 
 
@@ -34,23 +42,48 @@ def require_artresizer_compare(test):
     def wrapper(*args, **kwargs):
         if not ArtResizer.shared.can_compare:
             raise unittest.SkipTest("compare not available")
-        else:
-            return test(*args, **kwargs)
+
+        # PHASH computation in ImageMagick changed at some point in an
+        # undocumented way. Check at a low level that comparisons of our
+        # fixtures give the expected results. Only then, plugin logic tests
+        # below are meaningful.
+        # cf. https://github.com/ImageMagick/ImageMagick/discussions/5191
+        # It would be better to investigate what exactly change in IM and
+        # handle that in ArtResizer.IMBackend.{can_compare,compare}.
+        # Skipping the tests as below is a quick fix to CI, but users may
+        # still see unexpected behaviour.
+        abbey_artpath = os.path.join(_common.RSRC, b"abbey.jpg")
+        abbey_similarpath = os.path.join(_common.RSRC, b"abbey-similar.jpg")
+        abbey_differentpath = os.path.join(_common.RSRC, b"abbey-different.jpg")
+        compare_threshold = 20
+
+        similar_compares_ok = ArtResizer.shared.compare(
+            abbey_artpath,
+            abbey_similarpath,
+            compare_threshold,
+        )
+        different_compares_ok = ArtResizer.shared.compare(
+            abbey_artpath,
+            abbey_differentpath,
+            compare_threshold,
+        )
+        if not similar_compares_ok or different_compares_ok:
+            raise unittest.SkipTest("IM version with broken compare")
+
+        return test(*args, **kwargs)
 
     wrapper.__name__ = test.__name__
     return wrapper
 
 
-class EmbedartCliTest(PluginMixin, FetchImageHelper, BeetsTestCase):
+class EmbedartCliTest(
+    ImportHelper, IOMixin, PluginMixin, FetchImageHelper, BeetsTestCase
+):
     plugin = "embedart"
     small_artpath = os.path.join(_common.RSRC, b"image-2x3.jpg")
     abbey_artpath = os.path.join(_common.RSRC, b"abbey.jpg")
     abbey_similarpath = os.path.join(_common.RSRC, b"abbey-similar.jpg")
     abbey_differentpath = os.path.join(_common.RSRC, b"abbey-different.jpg")
-
-    def setUp(self):
-        super().setUp()  # Converter is threaded
-        self.io.install()
 
     def _setup_data(self, artpath=None):
         if not artpath:
@@ -115,9 +148,7 @@ class EmbedartCliTest(PluginMixin, FetchImageHelper, BeetsTestCase):
         if os.path.isfile(syspath(tmp_path)):
             os.remove(syspath(tmp_path))
             self.fail(
-                "Artwork file {} was not deleted".format(
-                    displayable_path(tmp_path)
-                )
+                f"Artwork file {displayable_path(tmp_path)} was not deleted"
             )
 
     def test_art_file_missing(self):
@@ -153,9 +184,9 @@ class EmbedartCliTest(PluginMixin, FetchImageHelper, BeetsTestCase):
         self.run_command("embedart", "-y", "-f", self.abbey_differentpath)
         mediafile = MediaFile(syspath(item.path))
 
-        assert (
-            mediafile.images[0].data == self.image_data
-        ), f"Image written is not {displayable_path(self.abbey_artpath)}"
+        assert mediafile.images[0].data == self.image_data, (
+            f"Image written is not {displayable_path(self.abbey_artpath)}"
+        )
 
     @require_artresizer_compare
     def test_accept_similar_art(self):
@@ -167,31 +198,29 @@ class EmbedartCliTest(PluginMixin, FetchImageHelper, BeetsTestCase):
         self.run_command("embedart", "-y", "-f", self.abbey_similarpath)
         mediafile = MediaFile(syspath(item.path))
 
-        assert (
-            mediafile.images[0].data == self.image_data
-        ), f"Image written is not {displayable_path(self.abbey_similarpath)}"
+        assert mediafile.images[0].data == self.image_data, (
+            f"Image written is not {displayable_path(self.abbey_similarpath)}"
+        )
 
     def test_non_ascii_album_path(self):
         resource_path = os.path.join(_common.RSRC, b"image.mp3")
         album = self.add_album_fixture()
         trackpath = album.items()[0].path
-        albumpath = album.path
         shutil.copy(syspath(resource_path), syspath(trackpath))
 
         self.run_command("extractart", "-n", "extracted")
 
-        self.assertExists(os.path.join(albumpath, b"extracted.png"))
+        assert (album.filepath / "extracted.png").exists()
 
     def test_extracted_extension(self):
         resource_path = os.path.join(_common.RSRC, b"image-jpeg.mp3")
         album = self.add_album_fixture()
         trackpath = album.items()[0].path
-        albumpath = album.path
         shutil.copy(syspath(resource_path), syspath(trackpath))
 
         self.run_command("extractart", "-n", "extracted")
 
-        self.assertExists(os.path.join(albumpath, b"extracted.jpg"))
+        assert (album.filepath / "extracted.jpg").exists()
 
     def test_clear_art_with_yes_input(self):
         self._setup_data()
@@ -199,10 +228,20 @@ class EmbedartCliTest(PluginMixin, FetchImageHelper, BeetsTestCase):
         item = album.items()[0]
         self.io.addinput("y")
         self.run_command("embedart", "-f", self.small_artpath)
+        embedded_time = os.path.getmtime(syspath(item.path))
+
         self.io.addinput("y")
         self.run_command("clearart")
         mediafile = MediaFile(syspath(item.path))
         assert not mediafile.images
+        clear_time = os.path.getmtime(syspath(item.path))
+        assert clear_time > embedded_time
+
+        # A run on a file without an image should not be modified
+        self.io.addinput("y")
+        self.run_command("clearart")
+        no_clear_time = os.path.getmtime(syspath(item.path))
+        assert no_clear_time == clear_time
 
     def test_clear_art_with_no_input(self):
         self._setup_data()
@@ -247,6 +286,32 @@ class EmbedartCliTest(PluginMixin, FetchImageHelper, BeetsTestCase):
         mediafile = MediaFile(syspath(item.path))
         assert not mediafile.images
 
+    def test_clearart_on_import_disabled(self):
+        file_path = self.create_mediafile_fixture(
+            images=["jpg"], target_dir=self.import_path
+        )
+        self.import_media.append(file_path)
+        with self.configure_plugin({"clearart_on_import": False}):
+            importer = self.setup_importer(autotag=False, write=True)
+            importer.run()
+
+        item = self.lib.items()[0]
+        assert MediaFile(os.path.join(item.path)).images
+
+    def test_clearart_on_import_enabled(self):
+        file_path = self.create_mediafile_fixture(
+            images=["jpg"], target_dir=self.import_path
+        )
+        self.import_media.append(file_path)
+        # Force re-init the plugin to register the listener
+        self.unload_plugins()
+        with self.configure_plugin({"clearart_on_import": True}):
+            importer = self.setup_importer(autotag=False, write=True)
+            importer.run()
+
+        item = self.lib.items()[0]
+        assert not MediaFile(os.path.join(item.path)).images
+
 
 class DummyArtResizer(ArtResizer):
     """An `ArtResizer` which pretends that ImageMagick is available, and has
@@ -258,7 +323,7 @@ class DummyArtResizer(ArtResizer):
 
 
 @patch("beets.util.artresizer.subprocess")
-@patch("beets.art.extract")
+@patch("beetsplug._utils.art.extract")
 class ArtSimilarityTest(unittest.TestCase):
     def setUp(self):
         self.item = _common.item()
@@ -285,8 +350,8 @@ class ArtSimilarityTest(unittest.TestCase):
         mock_extract,
         mock_subprocess,
         compare_status=0,
-        compare_stdout="",
-        compare_stderr="",
+        compare_stdout=b"",
+        compare_stderr=b"",
         convert_status=0,
     ):
         mock_extract.return_value = b"extracted_path"
@@ -298,33 +363,33 @@ class ArtSimilarityTest(unittest.TestCase):
         ]
 
     def test_compare_success_similar(self, mock_extract, mock_subprocess):
-        self._mock_popens(mock_extract, mock_subprocess, 0, "10", "err")
+        self._mock_popens(mock_extract, mock_subprocess, 0, b"10", b"err")
         assert self._similarity(20)
 
     def test_compare_success_different(self, mock_extract, mock_subprocess):
-        self._mock_popens(mock_extract, mock_subprocess, 0, "10", "err")
+        self._mock_popens(mock_extract, mock_subprocess, 0, b"10", b"err")
         assert not self._similarity(5)
 
     def test_compare_status1_similar(self, mock_extract, mock_subprocess):
-        self._mock_popens(mock_extract, mock_subprocess, 1, "out", "10")
+        self._mock_popens(mock_extract, mock_subprocess, 1, b"out", b"10")
         assert self._similarity(20)
 
     def test_compare_status1_different(self, mock_extract, mock_subprocess):
-        self._mock_popens(mock_extract, mock_subprocess, 1, "out", "10")
+        self._mock_popens(mock_extract, mock_subprocess, 1, b"out", b"10")
         assert not self._similarity(5)
 
     def test_compare_failed(self, mock_extract, mock_subprocess):
-        self._mock_popens(mock_extract, mock_subprocess, 2, "out", "10")
+        self._mock_popens(mock_extract, mock_subprocess, 2, b"out", b"10")
         assert self._similarity(20) is None
 
     def test_compare_parsing_error(self, mock_extract, mock_subprocess):
-        self._mock_popens(mock_extract, mock_subprocess, 0, "foo", "bar")
+        self._mock_popens(mock_extract, mock_subprocess, 0, b"foo", b"bar")
         assert self._similarity(20) is None
 
     def test_compare_parsing_error_and_failure(
         self, mock_extract, mock_subprocess
     ):
-        self._mock_popens(mock_extract, mock_subprocess, 1, "foo", "bar")
+        self._mock_popens(mock_extract, mock_subprocess, 1, b"foo", b"bar")
         assert self._similarity(20) is None
 
     def test_convert_failure(self, mock_extract, mock_subprocess):

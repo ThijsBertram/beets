@@ -12,6 +12,7 @@ from beetsplug.muziekmachine.sources.youtube.mm_youtube import YoutubeBeetsPlugi
 #   - PARSING FROM SONG STRINGS
 #   - YOUTUBE PULL SONGS
 #       * implmement parsing of string titles
+#       * FIX THIS IN MAPPER
 #   - YOUTUBE PULL PLAYLISTS
 #       * 
 #   - REKORDBOX PULL SONGS
