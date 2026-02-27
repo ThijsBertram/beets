@@ -77,7 +77,7 @@ class OpenAICaller:
         last_message = messages[-1]['content']
         answer = last_message[0]['text']['value']
         data = eval(answer)
-        return data
+        return answer, data
 
     def parse_song_string(self, song_string):
         """ Use an OpenAI assistant to parse a song string and extract data from it.
@@ -96,8 +96,8 @@ class OpenAICaller:
         run = self._submit_message(thread, song_string)
         run = self._wait_for_response(thread, run)
         messages = self._get_messages(thread)
-        song_data = self._parse_response(messages)
-        return song_data
+        response_text, song_data = self._parse_response(messages)
+        return response_text, song_data
    
 class SongStringParser(BeetsPlugin):
     def __init__(self):
@@ -123,7 +123,6 @@ class SongStringParser(BeetsPlugin):
         self.custom_gpt_command.func = self.send_gpt_request
 
         self.known_artists = self.get_known_artists_from_db()
-
 
     def commands(self):
         return [self.custom_gpt_command]
@@ -171,7 +170,6 @@ class SongStringParser(BeetsPlugin):
             s = os.path.join(path, s)
         
         return s
-
 
     def get_known_artists_from_db(extract_duos_only=True):
         # Connect to the SQLite database (change the connection method for other databases)
@@ -377,17 +375,37 @@ class SongStringParser(BeetsPlugin):
             'main_artist': artists[0]
         }
 
-    def send_gpt_request(self, args):
+    def send_gpt_request(self, lib, args):
         results = list()
         for song_string in args:
-            try:
-                response = self.parser.parse_song_string(song_string)
-                # print(response)
-                        # Remove duplicates based on substrings
-                self._log.info(f'CHATGPT CORRECTLY PARSED Song String: {song_string}\n\n')
-                results.append((song_string, response))
-            except Exception as e:
-                self._log.error(f"Error processing song string {song_string}: {e}")
+
+            # see if it already exists
+            with lib.transaction() as tx:
+                exists = tx.query(
+                    "SELECT result from gptresults WHERE songstring = ?",
+                    (song_string,)
+                )
+
+                if exists:
+                    response = dict(exists[0])
+                    data = eval(response['result'])
+                    data.pop('confidence')
+ 
+                    self._log.log(1, 'CHATGPT request taken from HISTORY')
+                    results.append((song_string, data))
+                    continue
+                else:
+
+                    try:
+                        text, data = self.parser.parse_song_string(song_string)
+                        tx.mutate(
+                            "INSERT into gptresults (songstring, result) VALUES (?, ?)",
+                            (song_string, text)
+                        )
+                        self._log.info(f'CHATGPT CORRECTLY PARSED Song String: {song_string}\n\n')
+                        results.append((song_string, data))
+                    except Exception as e:
+                        self._log.error(f"Error processing song string {song_string}: {e}")
 
 
 
@@ -404,4 +422,3 @@ class SongStringParser(BeetsPlugin):
         else:
             return ', '.join(string_list[:-1]) + ' & ' + string_list[-1]
         
-    

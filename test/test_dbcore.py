@@ -19,14 +19,25 @@ import shutil
 import sqlite3
 import unittest
 from tempfile import mkstemp
+from typing import ClassVar
 
 import pytest
 
 from beets import dbcore
+from beets.dbcore.db import DBCustomFunctionError, Index
+from beets.library import LibModel
 from beets.test import _common
+from beets.util import cached_classproperty
 
 # Fixture: concrete database and model classes. For migration tests, we
 # have multiple models with different numbers of fields.
+
+
+@pytest.fixture
+def db(model):
+    db = model(":memory:")
+    yield db
+    db._connection().close()
 
 
 class SortFixture(dbcore.query.FieldSort):
@@ -44,23 +55,31 @@ class QueryFixture(dbcore.query.FieldQuery):
         return True
 
 
-class ModelFixture1(dbcore.Model):
+class ModelFixture1(LibModel):
     _table = "test"
     _flex_table = "testflex"
-    _fields = {
+    _fields: ClassVar[dict[str, dbcore.types.Type]] = {
         "id": dbcore.types.PRIMARY_ID,
         "field_one": dbcore.types.INTEGER,
         "field_two": dbcore.types.STRING,
     }
-    _types = {
-        "some_float_field": dbcore.types.FLOAT,
-    }
-    _sorts = {
+
+    _sorts: ClassVar[dict[str, type[dbcore.query.FieldSort]]] = {
         "some_sort": SortFixture,
     }
-    _queries = {
-        "some_query": QueryFixture,
-    }
+    _indices = (Index("field_one_index", ("field_one",)),)
+
+    @cached_classproperty
+    def _types(cls):
+        return {
+            "some_float_field": dbcore.types.FLOAT,
+        }
+
+    @cached_classproperty
+    def _queries(cls):
+        return {
+            "some_query": QueryFixture,
+        }
 
     @classmethod
     def _getters(cls):
@@ -72,11 +91,10 @@ class ModelFixture1(dbcore.Model):
 
 class DatabaseFixture1(dbcore.Database):
     _models = (ModelFixture1,)
-    pass
 
 
 class ModelFixture2(ModelFixture1):
-    _fields = {
+    _fields: ClassVar[dict[str, dbcore.types.Type]] = {
         "id": dbcore.types.PRIMARY_ID,
         "field_one": dbcore.types.INTEGER,
         "field_two": dbcore.types.INTEGER,
@@ -85,11 +103,10 @@ class ModelFixture2(ModelFixture1):
 
 class DatabaseFixture2(dbcore.Database):
     _models = (ModelFixture2,)
-    pass
 
 
 class ModelFixture3(ModelFixture1):
-    _fields = {
+    _fields: ClassVar[dict[str, dbcore.types.Type]] = {
         "id": dbcore.types.PRIMARY_ID,
         "field_one": dbcore.types.INTEGER,
         "field_two": dbcore.types.INTEGER,
@@ -99,11 +116,10 @@ class ModelFixture3(ModelFixture1):
 
 class DatabaseFixture3(dbcore.Database):
     _models = (ModelFixture3,)
-    pass
 
 
 class ModelFixture4(ModelFixture1):
-    _fields = {
+    _fields: ClassVar[dict[str, dbcore.types.Type]] = {
         "id": dbcore.types.PRIMARY_ID,
         "field_one": dbcore.types.INTEGER,
         "field_two": dbcore.types.INTEGER,
@@ -114,20 +130,20 @@ class ModelFixture4(ModelFixture1):
 
 class DatabaseFixture4(dbcore.Database):
     _models = (ModelFixture4,)
-    pass
 
 
 class AnotherModelFixture(ModelFixture1):
     _table = "another"
     _flex_table = "anotherflex"
-    _fields = {
+    _fields: ClassVar[dict[str, dbcore.types.Type]] = {
         "id": dbcore.types.PRIMARY_ID,
         "foo": dbcore.types.INTEGER,
     }
+    _indices = (Index("another_foo_index", ("foo",)),)
 
 
 class ModelFixture5(ModelFixture1):
-    _fields = {
+    _fields: ClassVar[dict[str, dbcore.types.Type]] = {
         "some_string_field": dbcore.types.STRING,
         "some_float_field": dbcore.types.FLOAT,
         "some_boolean_field": dbcore.types.BOOLEAN,
@@ -136,12 +152,10 @@ class ModelFixture5(ModelFixture1):
 
 class DatabaseFixture5(dbcore.Database):
     _models = (ModelFixture5,)
-    pass
 
 
 class DatabaseFixtureTwoModels(dbcore.Database):
     _models = (ModelFixture2, AnotherModelFixture)
-    pass
 
 
 class ModelFixtureWithGetters(dbcore.Model):
@@ -227,6 +241,14 @@ class MigrationTest(unittest.TestCase):
         except sqlite3.OperationalError:
             self.fail("select failed")
 
+    def test_index_creation(self):
+        """Test that declared indices are created on database initialization."""
+        db = DatabaseFixture1(":memory:")
+        with db.transaction() as tx:
+            rows = tx.query("PRAGMA index_info(field_one_index)")
+            assert len(rows) > 0  # Index exists
+        db._connection().close()
+
 
 class TransactionTest(unittest.TestCase):
     def setUp(self):
@@ -247,7 +269,7 @@ class TransactionTest(unittest.TestCase):
     def test_query_no_increase_revision(self):
         old_rev = self.db.revision
         with self.db.transaction() as tx:
-            tx.query("PRAGMA table_info(%s)" % ModelFixture1._table)
+            tx.query(f"PRAGMA table_info({ModelFixture1._table})")
         assert self.db.revision == old_rev
 
 
@@ -400,7 +422,7 @@ class ModelTest(unittest.TestCase):
     def test_computed_field(self):
         model = ModelFixtureWithGetters()
         assert model.aComputedField == "thing"
-        with pytest.raises(KeyError, match="computed field .+ deleted"):
+        with pytest.raises(KeyError, match=r"computed field .+ deleted"):
             del model.aComputedField
 
     def test_items(self):
@@ -419,6 +441,20 @@ class ModelTest(unittest.TestCase):
     def test_parse_nonstring(self):
         with pytest.raises(TypeError, match="must be a string"):
             dbcore.Model._parse(None, 42)
+
+    def test_pickle_dump(self):
+        """Tries to pickle an item. This tests the __getstate__ method
+        of the Model ABC"""
+        import pickle
+
+        model = ModelFixture1(self.db)
+        model.add(self.db)
+        model.field_one = 123
+
+        model.store()
+        assert model._db is not None
+
+        pickle.dumps(model)
 
 
 class FormatTest(unittest.TestCase):
@@ -587,7 +623,7 @@ class QueryFromStringsTest(unittest.TestCase):
         q = self.qfs(["foo", "bar:baz"])
         assert isinstance(q, dbcore.query.AndQuery)
         assert len(q.subqueries) == 2
-        assert isinstance(q.subqueries[0], dbcore.query.AnyFieldQuery)
+        assert isinstance(q.subqueries[0], dbcore.query.OrQuery)
         assert isinstance(q.subqueries[1], dbcore.query.SubstringQuery)
 
     def test_parse_fixed_type_query(self):
@@ -761,3 +797,25 @@ class ResultsIteratorTest(unittest.TestCase):
             self.db._fetch(ModelFixture1, dbcore.query.FalseQuery()).get()
             is None
         )
+
+
+class TestException:
+    @pytest.mark.parametrize("model", [DatabaseFixture1])
+    @pytest.mark.filterwarnings(
+        "ignore: .*plz_raise.*: pytest.PytestUnraisableExceptionWarning"
+    )
+    @pytest.mark.filterwarnings(
+        "error: .*: pytest.PytestUnraisableExceptionWarning"
+    )
+    def test_custom_function_error(self, db: DatabaseFixture1):
+        def plz_raise():
+            raise Exception("i haz raized")
+
+        db._connection().create_function("plz_raise", 0, plz_raise)
+
+        with db.transaction() as tx:
+            tx.mutate("insert into test (field_one) values (1)")
+
+        with pytest.raises(DBCustomFunctionError):
+            with db.transaction() as tx:
+                tx.query("select * from test where plz_raise()")

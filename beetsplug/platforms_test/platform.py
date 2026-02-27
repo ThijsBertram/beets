@@ -41,6 +41,10 @@ class Platform(ABC):
         pass
 
     @abstractmethod
-    def _parse_track_item(self, lib: Library, item: Dict) -> Dict:
+    def _parse_song_item(self, lib: Library, item: Dict) -> Dict:
         """Parse individual track data into a standardized format."""
+        pass
+
+    @abstractmethod
+    def _create_playlist(self, lib: Library, playlist_name: str) -> str:
         pass
