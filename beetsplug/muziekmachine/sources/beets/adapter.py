@@ -36,8 +36,8 @@ class BeetsAdapter(SourceAdapter):
             "bpm": getattr(songdata, "bpm", None),
             "key": getattr(songdata, "key", None),
             "genre": getattr(songdata, "genre", None),
-            "comments": getattr(songdata, "comment", None),
-            "path": getattr(songdata, "audiofile_path", None),
+            "comments": songdata.comment,
+            "path": songdata.path,
         }
 
     def capabilities(self) -> set[str]:
