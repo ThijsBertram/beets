@@ -24,7 +24,7 @@ class BeetsPlaylistAdapter(PlaylistAdapter):
         return str(row.get("name"))
     
     def make_ref(self, row: Dict[str, Any]) -> PlaylistRef:
-        return PlaylistRef(source="beets", id=str(row["id"]))
+        return PlaylistRef(source="beets", playlist_id=str(row["id"]))
     
 
     # ================
@@ -51,7 +51,7 @@ class BeetsPlaylistAdapter(PlaylistAdapter):
         return {
             "name": pd.name,
             "description": pd.description or "",
-            "type": getattr(pd, "type", "") or "",
+            "type": pd.playlist_type or "",
         }
 
     def render_current_members(self, raw_items: List[Any]) -> List[str]:

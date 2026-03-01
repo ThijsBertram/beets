@@ -111,7 +111,7 @@ class BeetsClient(SourceClient):
         
     def get_collection(self, ref: PlaylistRef, **kwargs) -> Iterable[CollectionStub]:
         if ref.source != 'beets' or not ref.playlist_id:
-            raise ClientConfigError("Beets get_collection requires PlaylistRef(source='beets', id=<id>)")
+            raise ClientConfigError("Beets get_collection requires PlaylistRef(source='beets', playlist_id=<id>)")
     
         conn = self.lib._connection()
         cur = conn.execute('SELECT * from playlist WHERE id=?', (ref.playlist_id))

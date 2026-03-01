@@ -1,31 +1,37 @@
-# domain/models.py (snippet)
 from __future__ import annotations
-from dataclasses import dataclass
-from typing import Optional, Dict, Any, Literal
 
-from pydantic import BaseModel, field_validator
-from typing import List, Optional, Tuple, Dict
-from beets.library import DateType
+from dataclasses import dataclass, field
 import datetime
-from fuzzywuzzy import fuzz
-from typing import Dict, List
+from typing import Any, Dict, Literal, Optional, Tuple
 
 from beets.library import Item
+from fuzzywuzzy import fuzz
+from pydantic import BaseModel, Field, field_validator
 
-from beetsplug.ssp import SongStringParser
+SourceName = Literal[
+    "spotify",
+    "youtube",
+    "rekordbox",
+    "beets",
+    "filesystem",
+    "soundcloud",
+    "string",
+]
 
-SourceName = Literal["spotify", "youtube", "rekordbox", "beets", "filesystem", "soundcloud", "string"]
 
 @dataclass(frozen=True)
 class SourceRef:
     source: SourceName
-    # One of these will be used depending on the source:
-    external_id: Optional[str] = None      # e.g. spotify track id, youtube video id
-    collection_id: Optional[str] = None    # e.g. playlist id (when items live under a collection)
-    path: Optional[str] = None             # filesystem path or Rekordbox "Location"
-    extra: Optional[Dict[str, Any]] = None # room for odd cases (TrackID, snapshot, etc.)
+    external_id: Optional[str] = None
+    collection_id: Optional[str] = None
+    path: Optional[str] = None
+    extra: Dict[str, Any] = field(default_factory=dict)
 
-    # Helper constructors (ergonomic sugar):
+    @property
+    def id(self) -> Optional[str]:
+        """Backward-compatible alias; prefer external_id."""
+        return self.external_id
+
     @staticmethod
     def spotify(track_id: str) -> "SourceRef":
         return SourceRef(source="spotify", external_id=track_id)
@@ -36,11 +42,7 @@ class SourceRef:
 
     @staticmethod
     def rekordbox(track_id: Optional[str] = None, location: Optional[str] = None) -> "SourceRef":
-        return SourceRef(
-            source="rekordbox",
-            external_id=track_id,   # TrackID in the XML
-            path=location,          # file Location in the XML (URL-ish path)
-        )
+        return SourceRef(source="rekordbox", external_id=track_id, path=location)
 
     @staticmethod
     def beets(item_id: str) -> "SourceRef":
@@ -52,153 +54,175 @@ class SourceRef:
 
     @staticmethod
     def string(input_str: str) -> "SourceRef":
-        return SourceRef(source="string")
-    
+        return SourceRef(source="string", extra={"input": input_str})
+
 
 @dataclass(frozen=True)
 class CollectionStub:
     id: str
     name: str
     raw: Dict[str, Any]
-    description: Optional[str] = ''
+    description: Optional[str] = ""
 
 
 class SongData(BaseModel):
+    """Canonical song representation used across all sources."""
+
+    # core identity
     title: str
-    path: Optional[str | None] = ''
-    main_artist: str
-    artists: Tuple = ()
-    genre: str = ''
-    subgenre: Optional[str] = ''
-    remixer: Optional[str] = ''
-    remix_type: Optional[str] = ''
-    last_edited_ISO: Optional[str] = datetime.datetime.now().isoformat()
-    # PLATFORMS
-    youtube_id: Optional[str] = ''
-    spotify_id: Optional[str] = ''
-    soundcloud_id: Optional[str] = ''
-    #PLAYLIST
-    playlist: Optional[dict] = {}
-    # REKORDBOX
-    rekordbox_id: Optional[str] = ''
-    rekordbox_path: Optional[str] = ''
+    main_artist: Optional[str] = None
+    artists: Tuple[str, ...] = ()
+
+    # textual/music metadata
+    feat_artist: Optional[str] = None
+    album: Optional[str] = None
+    genre: Optional[str] = None
+    subgenre: Optional[str] = None
+    remixer: Optional[str] = None
+    remix_type: Optional[str] = None
+    bpm: Optional[float] = None
+    key: Optional[str] = None
+    comment: Optional[str] = None
+
+    # location / timestamps
+    path: Optional[str] = None
+    last_edited_ISO: Optional[str] = Field(default_factory=lambda: datetime.datetime.now().isoformat())
+
+    # source IDs
+    youtube_id: Optional[str] = None
+    spotify_id: Optional[str] = None
+    soundcloud_id: Optional[str] = None
+    rekordbox_id: Optional[str] = None
+    rekordbox_path: Optional[str] = None
+
+    # rekordbox-specific metadata
     rekordbox_bpm: Optional[float] = None
-    rekordbox_tonality: Optional[str] = ''
-    rekordbox_comments: Optional[str] = ''
-    rekordbox_rating: Optional[str] = ''
-    rekordbox_cateogry: Optional[str] = ''
+    rekordbox_tonality: Optional[str] = None
+    rekordbox_comments: Optional[str] = None
+    rekordbox_rating: Optional[str] = None
+    rekordbox_cateogry: Optional[str] = None
 
+    # contextual source metadata
+    playlist: Dict[str, Any] = Field(default_factory=dict)
 
+    @property
+    def audiofile_path(self) -> Optional[str]:
+        """Backward-compatible alias for older adapter code."""
+        return self.path
+
+    @field_validator("artists", mode="before")
     @classmethod
-    def from_string(cls, data: str) -> "SongData":
-        # LOGIC FOR CREATING SONGDATA FROM STRING
-        return
-    
-    @classmethod
-    def from_youtube(cls, data: dict) -> "SongData":
-        return
-    
-    @classmethod
-    def from_spotify(cls, data: dict) -> "SongData":
-        return
-
-    @classmethod
-    def from_beets(cls, data: Item) -> "SongData":
-        return
-
-    def __eq__(self, other):
-        if isinstance(other, SongData):
-            # Match based on TITLE and ARTIST
-            title_alike = 1 if fuzz.ratio(self.title.lower(), other.title.lower()) >= 97 else 0 
-            artists_alike = 1 if fuzz.ratio(' '.join(self.artists).lower(), ' '.join(other.artists).lower()) >= 97 else 0
-            alike = 1 if artists_alike and title_alike else 0
-
-            # 
-            return alike
-        
-    def __hash__(self):
-        return hash((self.artists, self.title))
-    
-
-    @field_validator('artists', mode='before')
     def split_artists(cls, value):
-        if isinstance(value, str):
-            return tuple([artist.strip().lower() for artist in value.split(',')])
-        elif isinstance(value, list):
-            value = ','.join(value)
-            value = value.split(',')
+        if value is None:
+            return ()
 
-            return tuple(sorted([artist.strip().lower() for artist in value]))
+        if isinstance(value, str):
+            parsed = [artist.strip().lower() for artist in value.split(",") if artist.strip()]
+            return tuple(sorted(parsed))
+
+        if isinstance(value, list):
+            parsed = [str(artist).strip().lower() for artist in value if str(artist).strip()]
+            return tuple(sorted(parsed))
+
+        if isinstance(value, tuple):
+            parsed = [str(artist).strip().lower() for artist in value if str(artist).strip()]
+            return tuple(sorted(parsed))
 
         return value
 
-    
-    # @field_validator('added', mode='before')
-    # def datetime_to_iso(cls, value):
-    #     if isinstance(value, datetime.datetime):
-    #         return value.isoformat()
-    #     if isinstance(value, type(None)):
-    #         return ''
-    
+    @classmethod
+    def from_string(cls, data: str) -> "SongData":
+        return cls(title=data.strip(), main_artist=None, artists=())
 
+    @classmethod
+    def from_youtube(cls, data: dict) -> "SongData":
+        return cls(
+            title=(data.get("title") or "").strip(),
+            main_artist=(data.get("main_artist") or None),
+            artists=data.get("artists") or (),
+            youtube_id=data.get("youtube_id"),
+        )
 
+    @classmethod
+    def from_spotify(cls, data: dict) -> "SongData":
+        return cls(
+            title=(data.get("title") or "").strip(),
+            main_artist=(data.get("main_artist") or None),
+            artists=data.get("artists") or (),
+            spotify_id=data.get("spotify_id"),
+        )
 
+    @classmethod
+    def from_beets(cls, data: Item) -> "SongData":
+        return cls(
+            title=getattr(data, "title", "") or "",
+            main_artist=getattr(data, "artist", None),
+            artists=getattr(data, "artists", ()) or (),
+            path=str(getattr(data, "path", "") or "") or None,
+            genre=getattr(data, "genre", None),
+            comment=getattr(data, "comments", None) or getattr(data, "comment", None),
+            spotify_id=getattr(data, "spotify_id", None),
+            youtube_id=getattr(data, "youtube_id", None),
+        )
 
+    def __eq__(self, other):
+        if not isinstance(other, SongData):
+            return NotImplemented
 
-# SongPointer lets playlist membership be source-agnostic: once a song is matched, store the canonical song_id. Before that, keep the SourceRef so we can back-fill later.
+        title_alike = fuzz.ratio((self.title or "").lower(), (other.title or "").lower()) >= 97
+        self_artists = " ".join(self.artists or ()).lower()
+        other_artists = " ".join(other.artists or ()).lower()
+        artists_alike = fuzz.ratio(self_artists, other_artists) >= 97
+        return title_alike and artists_alike
 
-
-
+    def __hash__(self):
+        return hash((self.artists, self.title))
 
 
 @dataclass(frozen=True)
 class PlaylistRef:
     source: SourceName
-    playlist_id: Optional[str] = None              # playlist id / crate id / folder id
-    path: Optional[str] = None            # if filesystem-represented playlists exist
-    extra: Optional[Dict[str, Any]] = None
+    playlist_id: Optional[str] = None
+    path: Optional[str] = None
+    extra: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def id(self) -> Optional[str]:
+        """Backward-compatible alias; prefer playlist_id."""
+        return self.playlist_id
+
 
 @dataclass(frozen=True)
 class SongPointer:
-    """Reference to a song for membership lists; ideally your canonical song_id, else SourceRef fallback."""
-    song_id: Optional[str] = None         # your canonical id after matching
-    source_ref: Optional[Dict[str, Any]] = None  # e.g., {"source":"spotify","id":"..."} for unresolved
+    """Reference to playlist members.
 
+    Prefer canonical `song_id`; otherwise store an unresolved source reference.
+    """
+
+    song_id: Optional[str] = None
+    source_ref: Optional[Dict[str, Any]] = None
 
 
 @dataclass
 class PlaylistData:
+    """Canonical playlist representation used across all sources."""
+
+    # core metadata
     name: str
     description: Optional[str] = None
-    owner: Optional[str] = None           # channel/user/account
+    owner: Optional[str] = None
     is_public: Optional[bool] = None
-    # ordered membership:
-    members: List[SongPointer] = None
-    # source ids:
+
+    # ordered membership
+    members: list[SongPointer] = field(default_factory=list)
+
+    # source identifiers
     spotify_id: Optional[str] = None
     youtube_id: Optional[str] = None
     rekordbox_id: Optional[str] = None
     beets_id: Optional[str] = None
     filesystem_id: Optional[str] = None
-    # optional: tags, cover art url, etc.
-    last_edited_at: str = ''
-    playlist_type: str = ''
 
-
-# class PlaylistData(BaseModel):
-#     name: str
-#     description: Optional[str] = ''
-#     path: Optional[str] = ''    
-#     rkbx_id: str = ''
-#     spotify_id: str = ''
-#     youtube_id: str = ''
-#     soundcloud_id: Optional[str] = ''
-#     last_edited_at: str = ''
-#     playlist_type: Optional[str] = ''
-#     songs: dict = {
-#         'youtube':  List[SongData],
-#         'spotify': List[SongData],
-#         'total': List[SongData],
-#         'rkbx': List[SongData],
-#         'usb': List[SongData]
-#     }
+    # extra metadata
+    last_edited_at: Optional[str] = None
+    playlist_type: Optional[str] = None

@@ -156,15 +156,15 @@ class SpotifyClient(SourceClient):
 
         assert self.api is not None, "SpotifyClient not connected"
 
-        if ref.source != "spotify" or not ref.id:
-            raise ClientConfigError("Spotify get_item requires SourceRef(source='spotify', id=<track_id>)")
+        if ref.source != "spotify" or not ref.external_id:
+            raise ClientConfigError("Spotify get_item requires SourceRef(source='spotify', external_id=<track_id>)")
 
         try:
-            track = self.api.track(ref.id)
+            track = self.api.track(ref.external_id)
             return {"track": track}
         except spotipy.exceptions.SpotifyException as e:
             if e.http_status == 404:
-                raise ClientNotFoundError(f"Spotify track not found: {ref.id}") from e
+                raise ClientNotFoundError(f"Spotify track not found: {ref.external_id}") from e
             if e.http_status in (401, 403):
                 raise ClientAuthError(str(e)) from e
             raise

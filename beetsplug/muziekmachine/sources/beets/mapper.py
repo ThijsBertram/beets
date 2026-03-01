@@ -10,8 +10,8 @@ class BeetsMapper:
         # Map only what matters; extend as needed
         return SongData(
             title=item.title,
-            path=item.path,
-            main_artist=item.main_artist or None,
+            path=str(item.path) if getattr(item, "path", None) else None,
+            main_artist=getattr(item, "main_artist", None) or getattr(item, "artist", None),
             artists=item.artists,
             genre=getattr(item, "genre", None),
             subgenre=getattr(item, "subgenre", None),
@@ -38,7 +38,7 @@ class BeetsMapper:
             spotify_id=row.get("spotify_id"),
             youtube_id=row.get("youtube_id"),
             rekordbox_id=row.get("rekordbox_id"),
-            path=row.get("path"),
+            filesystem_id=row.get("path"),
             members=[],
         )
         if items:

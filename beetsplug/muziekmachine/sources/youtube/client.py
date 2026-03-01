@@ -152,13 +152,13 @@ class YouTubeClient(SourceClient):
     # ── fetch single video by id ─────────────────────────────────────────────
     def get_item(self, ref: SourceRef, **kwargs) -> Mapping[str, Any]:
         assert self.api is not None, "YouTubeClient not connected"
-        if ref.source != "youtube" or not ref.id:
-            raise ClientConfigError("YouTube get_item requires SourceRef(source='youtube', id=<video_id>)")
+        if ref.source != "youtube" or not ref.external_id:
+            raise ClientConfigError("YouTube get_item requires SourceRef(source='youtube', external_id=<video_id>)")
         try:
-            resp = self.api.videos().list(part="snippet,contentDetails,status", id=ref.id, maxResults=1).execute()
+            resp = self.api.videos().list(part="snippet,contentDetails,status", id=ref.external_id, maxResults=1).execute()
             items = resp.get("items", [])
             if not items:
-                raise ClientNotFoundError(f"YouTube video not found: {ref.id}")
+                raise ClientNotFoundError(f"YouTube video not found: {ref.external_id}")
             # Normalize shape to look like a playlist item enough for adapter/mapper to cope.
             video = items[0]
             return {
@@ -172,7 +172,7 @@ class YouTubeClient(SourceClient):
             }
         except HttpError as e:
             if getattr(e, "resp", None) and getattr(e.resp, "status", None) == 404:
-                raise ClientNotFoundError(f"YouTube video not found: {ref.id}") from e
+                raise ClientNotFoundError(f"YouTube video not found: {ref.external_id}") from e
             if getattr(e, "resp", None) and getattr(e.resp, "status", None) in (401, 403):
                 raise ClientAuthError(str(e)) from e
             raise ClientRequestError(str(e)) from e
