@@ -37,8 +37,8 @@ class SpotifyPlaylistAdapter(PlaylistAdapter):
 
     def render_current_fields(self, raw_playlist: Dict[str, Any]) -> Mapping[str, Any]:
         return {
-            "name": raw_playlist["playlist_name"],
-            "description": raw_playlist.get("playlist_description") or "",
+            "name": raw_playlist.get("name"),
+            "description": raw_playlist.get("description") or "",
             "public": raw_playlist.get("public", None),
         }
 
@@ -59,8 +59,9 @@ class SpotifyPlaylistAdapter(PlaylistAdapter):
             if sp.song_id:
                 keys.append(f"song:{sp.song_id}")     # canonical songs after matching
             else:
-                ref = sp.source_ref or {}
-                keys.append(f"{ref.get('source')}:{ref.get('id')}")
+                ref = sp.source_ref
+                if ref and ref.source and ref.external_id:
+                    keys.append(f"{ref.source}:{ref.external_id}")
         return keys
 
     def field_capabilities(self) -> set[str]:

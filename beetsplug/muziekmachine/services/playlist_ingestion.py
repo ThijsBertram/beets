@@ -9,12 +9,18 @@ def iter_collection_stubs(
     selectors: Optional[Sequence[str]] = None,  # names or ids; None/[] => ALL
 ) -> Iterable[CollectionStub]:
     want_all = not selectors
-    wanted = set(map(str, selectors or []))
+    wanted = [str(s).strip() for s in (selectors or []) if str(s).strip()]
 
     for stub in client.iter_collections():
         pid = stub.id or ""              # id for matching
         pname = stub.name or ""              # name for matching
-        if want_all or pid in wanted or pname in wanted:
+        pname_l = pname.lower()
+
+        exact_id = pid in wanted
+        exact_name = pname in wanted
+        partial_name = any(sel.lower() in pname_l for sel in wanted)
+
+        if want_all or exact_id or exact_name or partial_name:
             yield stub
 
 def iter_playlist_data(
