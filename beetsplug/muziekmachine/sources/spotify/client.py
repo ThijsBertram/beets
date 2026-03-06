@@ -94,6 +94,7 @@ class SpotifyClient(SourceClient):
                 yield coll
 
     def iter_items(self, collection: CollectionStub | None = None, **kwargs):
+        """Iterate playlist items using /playlists/{id}/items semantics (Spotipy >= 2.26)."""
         assert self.api is not None, "SpotifyClient not connected"
 
         if not collection:
@@ -102,12 +103,13 @@ class SpotifyClient(SourceClient):
             return
 
         playlist_id = collection.id
-        limit = kwargs.get("limit", 100)
+        limit = kwargs.get("limit", 50)
         offset = kwargs.get("offset", 0)
         while True:
             try:
-                page = self.api.playlist_tracks(playlist_id, limit=limit, offset=offset)
-                for item in page["items"]:
+                # Explicitly use playlist_items to avoid deprecated playlist_tracks wrapper.
+                page = self.api.playlist_items(playlist_id, limit=limit, offset=offset, additional_types=("track",))
+                for item in page.get("items", []):
                     yield item
                 if not page.get("next"):
                     break
@@ -136,23 +138,24 @@ class SpotifyClient(SourceClient):
             raise ClientRequestError(str(e)) from e
 
     def search_song_candidates(self, songdata: Any, limit: int = 10) -> Iterable[Dict[str, Any]]:
+        """Search candidates. Spotify Feb-2026 changed max limit to 10."""
         assert self.api is not None, "SpotifyClient not connected"
         title = getattr(songdata, "title", "")
         artist = getattr(songdata, "main_artist", "") or ""
         query = f"track:{title} artist:{artist}".strip()
+        safe_limit = min(max(int(limit or 1), 1), 10)
         try:
-            resp = self.api.search(q=query, type="track", limit=limit)
+            resp = self.api.search(q=query, type="track", limit=safe_limit)
             for item in resp.get("tracks", {}).get("items", []):
                 yield {"track": item}
         except Exception as e:
             raise ClientRequestError(str(e)) from e
 
     def create_collection(self, name: str, description: str = "", public: bool = False) -> CollectionStub:
+        """Create playlist via current-user endpoint (/me/playlists)."""
         assert self.api is not None, "SpotifyClient not connected"
         try:
-            user = self.api.current_user()
-            raw = self.api.user_playlist_create(
-                user=user["id"],
+            raw = self.api.current_user_playlist_create(
                 name=name,
                 public=public,
                 description=description or "",
@@ -167,6 +170,10 @@ class SpotifyClient(SourceClient):
             raise ClientRequestError(str(e)) from e
 
     def sync_collection_members(self, playlist_id: str, desired_track_ids: list[str]) -> None:
+        """Replace full membership using /playlists/{id}/items API via Spotipy.
+
+        Note: depends on Spotipy >= 2.26 where playlist_replace_items uses /items.
+        """
         assert self.api is not None, "SpotifyClient not connected"
         try:
             uris = [f"spotify:track:{track_id}" for track_id in desired_track_ids]
@@ -175,6 +182,13 @@ class SpotifyClient(SourceClient):
             raise ClientRequestError(str(e)) from e
 
     def delete_collection(self, playlist_id: str) -> None:
+        """Unfollow playlist.
+
+        Spotify's Feb-2026 API changes introduced library consolidation;
+        this call still relies on Spotipy's unfollow playlist helper.
+        If Spotify removes this endpoint for your app tier, migrate this method
+        to the new library semantics once Spotipy exposes a first-class helper.
+        """
         assert self.api is not None, "SpotifyClient not connected"
         try:
             self.api.current_user_unfollow_playlist(playlist_id)

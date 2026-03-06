@@ -1,5 +1,7 @@
 # muziekmachine status review (initial architecture + roadmap)
 
+> Note: see `LLM_CONTEXT.md` for the latest architecture/design context agreed during iterative development sessions.
+
 This document summarizes the current state of `beetsplug/muziekmachine` and a proposal to get to a robust multi-source sync plugin.
 
 ## 1) Current architecture (what already exists)
