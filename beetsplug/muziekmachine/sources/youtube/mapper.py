@@ -1,8 +1,9 @@
 from __future__ import annotations
-from typing import Any, Dict, Optional
-import re
 
-from beetsplug.muziekmachine.domain.models import SongData, PlaylistData
+import re
+from typing import Any, Dict, Optional
+
+from beetsplug.muziekmachine.domain.models import PlaylistData, SongData
 
 _TOPIC_SUFFIX_RE = re.compile(r"\s*-\s*Topic\s*$", flags=re.IGNORECASE)
 
@@ -11,6 +12,7 @@ class YouTubeMapper:
     """
     Pure raw->SongData (no I/O). Handles both playlistItem-shaped rows and video-shaped rows.
     """
+
     def _extract_video_fields(self, raw: Dict[str, Any]) -> Dict[str, Optional[str]]:
         # Accept both playlistItems().list and videos().list shapes
         snippet = raw.get("snippet", {})
@@ -59,12 +61,14 @@ class YouTubeMapper:
             youtube_id=youtube_id,
         )
 
-    # Optional: implement to_playlistdata later (for playlist-level sync)
     def to_playlistdata(self, raw_playlist: Dict[str, Any]) -> PlaylistData:
         snippet = raw_playlist.get("snippet", {})
+        status = raw_playlist.get("status", {})
         return PlaylistData(
             name=snippet.get("title") or "",
             description=snippet.get("description") or None,
+            owner=snippet.get("channelTitle") or None,
+            is_public=status.get("privacyStatus") == "public",
             youtube_id=raw_playlist.get("id"),
             members=[],
         )

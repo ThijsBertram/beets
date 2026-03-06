@@ -82,7 +82,7 @@ class YoutubeBeetsPlugin(BeetsPlugin):
         with client:
             count = 0 
             for pd in iter_playlist_data(client, playlist_adapter, selectors=playlists, include_items=False):
-                self._log.info(f"[Spotify] Playlist data pulled for playlist {pd.name}")
+                self._log.info(f"[YouTube] Playlist data pulled for playlist {pd.name}")
                 count += 1 
-        self._log.info(f"Pulled {count} Spotify playlists.")
+        self._log.info(f"Pulled {count} YouTube playlists.")
         return

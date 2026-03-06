@@ -1,22 +1,25 @@
 from __future__ import annotations
-from typing import Any, Dict, Iterable, Mapping, Optional, List
 
 import os
-import json
 from dataclasses import dataclass
+from typing import Any, Dict, Iterable, List, Mapping, Optional
 
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
+from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
-from beetsplug.muziekmachine.sources.base.client import SourceClient, RetryPolicy
+from beetsplug.muziekmachine.domain.models import CollectionStub, SourceRef
+from beetsplug.muziekmachine.sources.base.client import RetryPolicy, SourceClient
 from beetsplug.muziekmachine.sources.base.errors import (
-    ClientAuthError, ClientConfigError, ClientConnectionError,
-    ClientRequestError, ClientNotFoundError, ClientCapabilityError
+    ClientAuthError,
+    ClientCapabilityError,
+    ClientConfigError,
+    ClientConnectionError,
+    ClientNotFoundError,
+    ClientRequestError,
 )
-from beetsplug.muziekmachine.domain.models import SourceRef, CollectionStub
 
 
 @dataclass(frozen=True)
@@ -24,18 +27,11 @@ class _YTConfig:
     api_name: str = "youtube"
     api_version: str = "v3"
     scopes: str = "https://www.googleapis.com/auth/youtube"
-    # Where OAuth client secrets live (downloaded from Google Cloud console)
     client_secrets_file: str = "auth/client_secret.json"
-    # Where we cache the user token (refresh token etc.)
     token_path: str = "auth/yt_credentials.json"
 
 
 class YouTubeClient(SourceClient):
-    """
-    Transport-only YouTube client (no mapping/adapter logic).
-    Lists playlists, iterates playlist items, fetches single videos by id.
-    """
-
     source = "youtube"
 
     def __init__(
@@ -43,7 +39,7 @@ class YouTubeClient(SourceClient):
         *,
         client_secrets_file: str,
         token_path: str = "auth/yt_credentials.json",
-        scopes: List[str] = ['https://www.googleapis.com/auth/youtube'],
+        scopes: List[str] = ["https://www.googleapis.com/auth/youtube"],
         retry_policy: Optional[RetryPolicy] = None,
         api_name: str = "youtube",
         api_version: str = "v3",
@@ -59,12 +55,10 @@ class YouTubeClient(SourceClient):
         self.api = None
         self.creds: Optional[Credentials] = None
 
-    # ── lifecycle ────────────────────────────────────────────────────────────
     def connect(self) -> None:
         try:
             os.makedirs(os.path.dirname(self._cfg.token_path) or ".", exist_ok=True)
             creds: Optional[Credentials] = None
-
             if os.path.exists(self._cfg.token_path):
                 try:
                     creds = Credentials.from_authorized_user_file(self._cfg.token_path, self._cfg.scopes)
@@ -92,22 +86,12 @@ class YouTubeClient(SourceClient):
         self.api = None
         self.creds = None
 
-    # ── capabilities (metadata writes optional; playlists are write-capable, track meta is not) ──
     def capabilities(self) -> set[str]:
-        # For track metadata we’ll treat YouTube as read-only.
         return set()
 
-    # ── collections (playlists) ──────────────────────────────────────────────
     def iter_collections(self, **kwargs) -> Iterable[CollectionStub]:
-        """
-        Yield the user's playlists as CollectionStub.
-        """
         assert self.api is not None, "YouTubeClient not connected"
-        request = self.api.playlists().list(
-            part="id,snippet,contentDetails,status",
-            mine=True,
-            maxResults=50,
-        )
+        request = self.api.playlists().list(part="id,snippet,contentDetails,status", mine=True, maxResults=50)
         while request:
             try:
                 resp = request.execute()
@@ -122,21 +106,21 @@ class YouTubeClient(SourceClient):
             except HttpError as e:
                 raise ClientRequestError(str(e)) from e
 
-    # ── items (videos within a playlist) ─────────────────────────────────────
-    def iter_items(self, collection: CollectionStub | None = None, **kwargs) -> Iterable[Dict[str, Any]]:
-        """
-        Yield raw playlist-items for a given playlist.
-        If no collection is provided, iterate all collections and aggregate items.
-        """
-        assert self.api is not None, "YouTubeClient not connected"
+    def find_collections(self, query: str) -> Iterable[CollectionStub]:
+        q = (query or "").strip().lower()
+        for coll in self.iter_collections():
+            if q in (coll.name or "").lower() or q == (coll.id or ""):
+                yield coll
 
+    def iter_items(self, collection: CollectionStub | None = None, **kwargs) -> Iterable[Dict[str, Any]]:
+        assert self.api is not None, "YouTubeClient not connected"
         if collection is None:
             for coll in self.iter_collections():
                 yield from self.iter_items(coll, **kwargs)
             return
 
         request = self.api.playlistItems().list(
-            part="contentDetails,snippet,status",
+            part="id,contentDetails,snippet,status",
             playlistId=collection.id,
             maxResults=50,
         )
@@ -149,17 +133,18 @@ class YouTubeClient(SourceClient):
             except HttpError as e:
                 raise ClientRequestError(str(e)) from e
 
-    # ── fetch single video by id ─────────────────────────────────────────────
+    def iter_items_in_collection(self, coll):
+        return self.iter_items(coll)
+
     def get_item(self, ref: SourceRef, **kwargs) -> Mapping[str, Any]:
         assert self.api is not None, "YouTubeClient not connected"
-        if ref.source != "youtube" or not ref.id:
-            raise ClientConfigError("YouTube get_item requires SourceRef(source='youtube', id=<video_id>)")
+        if ref.source != "youtube" or not ref.external_id:
+            raise ClientConfigError("YouTube get_item requires SourceRef(source='youtube', external_id=<video_id>)")
         try:
-            resp = self.api.videos().list(part="snippet,contentDetails,status", id=ref.id, maxResults=1).execute()
+            resp = self.api.videos().list(part="snippet,contentDetails,status", id=ref.external_id, maxResults=1).execute()
             items = resp.get("items", [])
             if not items:
-                raise ClientNotFoundError(f"YouTube video not found: {ref.id}")
-            # Normalize shape to look like a playlist item enough for adapter/mapper to cope.
+                raise ClientNotFoundError(f"YouTube video not found: {ref.external_id}")
             video = items[0]
             return {
                 "contentDetails": {"videoId": video["id"], "duration": video.get("contentDetails", {}).get("duration")},
@@ -172,14 +157,72 @@ class YouTubeClient(SourceClient):
             }
         except HttpError as e:
             if getattr(e, "resp", None) and getattr(e.resp, "status", None) == 404:
-                raise ClientNotFoundError(f"YouTube video not found: {ref.id}") from e
+                raise ClientNotFoundError(f"YouTube video not found: {ref.external_id}") from e
             if getattr(e, "resp", None) and getattr(e.resp, "status", None) in (401, 403):
                 raise ClientAuthError(str(e)) from e
             raise ClientRequestError(str(e)) from e
 
-    # ── write (patch) — read-only for track metadata in this pipeline ───────
+    def search_song_candidates(self, songdata: Any, limit: int = 10) -> Iterable[Dict[str, Any]]:
+        assert self.api is not None, "YouTubeClient not connected"
+        title = getattr(songdata, "title", "")
+        artist = getattr(songdata, "main_artist", "") or ""
+        query = f"{title} {artist}".strip()
+        try:
+            req = self.api.search().list(part="snippet", q=query, type="video", maxResults=limit)
+            resp = req.execute()
+            for item in resp.get("items", []):
+                yield {
+                    "contentDetails": {"videoId": item.get("id", {}).get("videoId")},
+                    "snippet": item.get("snippet", {}),
+                }
+        except HttpError as e:
+            raise ClientRequestError(str(e)) from e
+
+    def create_collection(self, name: str, description: str = "", public: bool = False) -> CollectionStub:
+        assert self.api is not None, "YouTubeClient not connected"
+        body = {
+            "snippet": {"title": name, "description": description or ""},
+            "status": {"privacyStatus": "public" if public else "private"},
+        }
+        try:
+            raw = self.api.playlists().insert(part="snippet,status", body=body).execute()
+            return CollectionStub(
+                id=raw["id"],
+                name=raw.get("snippet", {}).get("title") or name,
+                description=(raw.get("snippet", {}).get("description") or ""),
+                raw=raw,
+            )
+        except HttpError as e:
+            raise ClientRequestError(str(e)) from e
+
+    def delete_collection(self, playlist_id: str) -> None:
+        assert self.api is not None, "YouTubeClient not connected"
+        try:
+            self.api.playlists().delete(id=playlist_id).execute()
+        except HttpError as e:
+            raise ClientRequestError(str(e)) from e
+
+    def sync_collection_members(self, playlist_id: str, desired_video_ids: list[str]) -> None:
+        assert self.api is not None, "YouTubeClient not connected"
+        stub = CollectionStub(id=playlist_id, name="", raw={}, description="")
+        current_items = list(self.iter_items(stub))
+        current_ids = [((item.get("contentDetails") or {}).get("videoId")) for item in current_items]
+
+        for item in current_items:
+            item_id = item.get("id")
+            vid = (item.get("contentDetails") or {}).get("videoId")
+            if item_id and vid and vid not in desired_video_ids:
+                self.api.playlistItems().delete(id=item_id).execute()
+
+        for vid in desired_video_ids:
+            if vid not in current_ids:
+                body = {
+                    "snippet": {
+                        "playlistId": playlist_id,
+                        "resourceId": {"kind": "youtube#video", "videoId": vid},
+                    }
+                }
+                self.api.playlistItems().insert(part="snippet", body=body).execute()
+
     def apply(self, ref: SourceRef, diff, **kwargs) -> None:
         raise ClientCapabilityError("YouTube is read-only for track metadata in this pipeline.")
-
-    def iter_items_in_collection(self, coll):
-        raise NotImplementedError

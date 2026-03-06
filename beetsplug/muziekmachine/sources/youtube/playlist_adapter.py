@@ -58,8 +58,10 @@ class YouTubePlaylistAdapter(PlaylistAdapter):
                 keys.append(f"song:{sp.song_id}")
             else:
                 ref = sp.source_ref or {}
-                if ref.get("source") == "youtube" and ref.get("id"):
-                    keys.append(f"youtube:{ref['id']}")
+                if ref.get("source") == "youtube":
+                    external_id = ref.get("external_id") or ref.get("id")
+                    if external_id:
+                        keys.append(f"youtube:{external_id}")
         return keys
 
     # ── capabilities ────────────────────────────────────────────────────────
