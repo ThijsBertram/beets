@@ -114,7 +114,9 @@ class PlatformManager(BeetsPlugin):
         playlist_type = opts.playlist_type
         no_db = opts.no_db
 
-        self.pull_platform_songs(lib, platform_str, playlist_name, playlist_type, no_db)
+        print('hoi')
+
+        # self.pull_platform_songs(lib, platform_str, playlist_name, playlist_type, no_db)
 
     # ──────────────────────────────────────────────────────────────────────────
     # OLD: PULL ALL DATA

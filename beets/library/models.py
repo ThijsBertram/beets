@@ -23,6 +23,7 @@ from beets.util import (
     syspath,
 )
 from beets.util.functemplate import Template, template
+from beets.dbcore.types import DateType
 
 from .exceptions import FileOperationError, ReadError, WriteError
 from .queries import PF_KEY_DEFAULT, parse_query_string
