@@ -1,7 +1,7 @@
 # adapters/base.py
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping, Optional, Dict
 
 from beetsplug.muziekmachine.sources.base.mapper import Mapper
 from beetsplug.muziekmachine.domain.diffs import Diff, compute as compute_diff
@@ -68,7 +68,7 @@ class SourceAdapter(ABC):
 
     # ---------- identity ----------
     @abstractmethod
-    def make_ref(self, raw: Any) -> SourceRef:
+    def make_ref(self, raw: Any, extra_keys: Optional[Dict[str, Any]] = None) -> SourceRef:
         """
         Produce a stable pointer to this raw record so services can re-fetch/patch later.
         """
