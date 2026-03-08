@@ -226,3 +226,26 @@ class PlaylistData:
     # extra metadata
     last_edited_at: Optional[str] = None
     playlist_type: Optional[str] = None
+
+
+@dataclass
+class PullSourceResult:
+    source: SourceName
+    playlists_scanned: int = 0
+    songs_seen: int = 0
+    songs_mapped: int = 0
+    duplicates_observed: int = 0
+    mapping_failures: int = 0
+    errors: list[str] = field(default_factory=list)
+
+
+@dataclass
+class PullSongsBatch:
+    result: PullSourceResult
+    entries: list[tuple[SongData, SourceRef]] = field(default_factory=list)
+
+
+@dataclass
+class PullPlaylistsBatch:
+    result: PullSourceResult
+    playlists: list[PlaylistData] = field(default_factory=list)

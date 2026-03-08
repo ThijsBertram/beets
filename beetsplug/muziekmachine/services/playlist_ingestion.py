@@ -1,6 +1,17 @@
 from __future__ import annotations
-from typing import Iterable, Tuple, Optional, Sequence, Dict, Any, List
-from beetsplug.muziekmachine.domain.models import PlaylistRef, PlaylistData, SourceName, CollectionStub
+from typing import Iterable, Optional, Sequence
+
+from beetsplug.muziekmachine.domain.models import PlaylistData, CollectionStub
+
+
+def resolve_playlist_selectors(
+    explicit_selectors: Optional[Sequence[str]],
+    default_selectors: Optional[Sequence[str]],
+) -> list[str]:
+    """Resolve selectors with explicit CLI selectors taking precedence over config defaults."""
+
+    selectors = explicit_selectors if explicit_selectors else default_selectors
+    return [str(s).strip() for s in (selectors or []) if str(s).strip()]
 
 
 def iter_collection_stubs(
@@ -12,8 +23,8 @@ def iter_collection_stubs(
     wanted = [str(s).strip() for s in (selectors or []) if str(s).strip()]
 
     for stub in client.iter_collections():
-        pid = stub.id or ""              # id for matching
-        pname = stub.name or ""              # name for matching
+        pid = stub.id or ""  # id for matching
+        pname = stub.name or ""  # name for matching
         pname_l = pname.lower()
 
         exact_id = pid in wanted
@@ -22,6 +33,7 @@ def iter_collection_stubs(
 
         if want_all or exact_id or exact_name or partial_name:
             yield stub
+
 
 def iter_playlist_data(
     client,
