@@ -49,7 +49,7 @@ def pull_source_batch(
             result.songs_seen += 1
             try:
                 songdata = adapter.to_songdata(raw)
-                ref = adapter.make_ref(raw)
+                ref = adapter.make_ref(raw, extra_keys={"collection_id": coll.id, "collection_name": coll.name})
             except MappingError:
                 result.mapping_failures += 1
                 continue

@@ -30,7 +30,7 @@ class YouTubeAdapter(SourceAdapter):
     def __init__(self, client, mapper: YouTubeMapper | None = None) -> None:
         super().__init__(client, mapper or YouTubeMapper())
 
-    def make_ref(self, raw: Dict[str, Any]) -> SourceRef:
+    def make_ref(self, raw: Dict[str, Any], extra_keys: Optional[Dict[str, Any]] = None) -> SourceRef:
         # playlistItems shape
         video_id = None
         if "contentDetails" in raw and raw["contentDetails"].get("videoId"):
@@ -38,7 +38,16 @@ class YouTubeAdapter(SourceAdapter):
         # videos() shape
         if not video_id:
             video_id = raw.get("id") or (raw.get("contentDetails", {}).get("videoId"))
-        return SourceRef(source="youtube", external_id=video_id)
+  
+        payload = {
+            "source": "youtube",
+            "external_id": video_id,
+        }
+
+        if extra_keys:
+            payload.update(extra_keys)
+
+        return SourceRef(**payload)
 
     def render_current(self, raw: Dict[str, Any]) -> Mapping[str, Any]:
         # Normalize for diffing (read-only for metadata, but good for reports)

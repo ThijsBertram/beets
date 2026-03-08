@@ -13,9 +13,17 @@ class SpotifyAdapter(SourceAdapter):
     """Bridge Spotify raw <-> SongData projections + SourceRef."""
     source = "spotify"
 
-    def make_ref(self, raw: Dict[str, Any]) -> SourceRef:
+    def make_ref(self, raw: Dict[str, Any], extra_keys: Optional[Dict[str, Any]] = None) -> SourceRef:
         track = raw if "track" not in raw else raw["track"]
-        return SourceRef(source="spotify", external_id=track["id"])
+        payload = {
+            "source": "spotify",
+            "external_id": track["id"],
+        }
+
+        if extra_keys:
+            payload.update(extra_keys)
+
+        return SourceRef(**payload)
 
     def render_current(self, raw: Dict[str, Any]) -> Mapping[str, Any]:
         track = raw if "track" not in raw else raw["track"]

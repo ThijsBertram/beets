@@ -24,6 +24,7 @@ class SourceRef:
     source: SourceName
     external_id: Optional[str] = None
     collection_id: Optional[str] = None
+    collection_name: Optional[str] = None
     path: Optional[str] = None
     extra: Dict[str, Any] = field(default_factory=dict)
 
