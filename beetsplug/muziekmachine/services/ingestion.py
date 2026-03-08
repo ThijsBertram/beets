@@ -2,8 +2,16 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Optional, Sequence, Tuple
 
-from beetsplug.muziekmachine.domain.models import SourceRef
-from beetsplug.muziekmachine.services.playlist_ingestion import iter_collection_stubs
+from beetsplug.muziekmachine.domain.models import (
+    PullPlaylistsBatch,
+    PullSongsBatch,
+    PullSourceResult,
+    SourceRef,
+)
+from beetsplug.muziekmachine.services.playlist_ingestion import (
+    iter_collection_stubs,
+    iter_playlist_data,
+)
 from beetsplug.muziekmachine.sources.base.adapter import MappingError
 
 
@@ -13,39 +21,82 @@ def pull_source(
     *,
     playlist: Optional[Sequence[str]] = None,
 ) -> Iterable[Tuple[Any, SourceRef]]:
-    """Iterate a source and yield (SongData, SourceRef) pairs.
+    """Backward-compatible iterator of mapped songs for selected playlists."""
 
-    `playlist` selectors are matched consistently via `iter_collection_stubs`
-    (supports exact id, exact name, and partial-name matching).
-    """
+    result = pull_source_batch(client, adapter, selectors=playlist)
+    yield from result.entries
 
-    def emit(raw):
-        try:
-            songdata = adapter.to_songdata(raw)
-            ref = adapter.make_ref(raw)
-        except MappingError:
-            print(f"UNABLE TO PARSE ENTRY:\n{raw}\n")
-            return None, None
-        return songdata, ref
 
-    # FETCH ITEMS FOR SPECIFIC PLAYLISTS / COLLECTIONS
-    if playlist:
-        for coll in iter_collection_stubs(client, selectors=playlist):
-            for raw in client.iter_items(coll):
-                songdata, ref = emit(raw)
-                if songdata:
-                    yield songdata, ref
-        return
+def pull_source_batch(
+    client,
+    adapter,
+    *,
+    selectors: Optional[Sequence[str]] = None,
+    limit: Optional[int] = None,
+) -> PullSongsBatch:
+    """Pull mapped songs into an in-memory batch with per-source summary metrics."""
 
-    # FETCH ALL ITEMS
-    if getattr(client, "supports_global_items", lambda: False)():
-        for raw in client.iter_items_global():
-            songdata, ref = emit(raw)
-            if songdata:
-                yield songdata, ref
-    else:
-        for coll in client.iter_collections():
-            for raw in client.iter_items(coll):
-                songdata, ref = emit(raw)
-                if songdata:
-                    yield songdata, ref
+    source_name = getattr(adapter, "source", "unknown")
+    result = PullSourceResult(source=source_name)
+    entries: list[tuple[Any, SourceRef]] = []
+    seen_external_ids: set[str] = set()
+
+    collections = list(iter_collection_stubs(client, selectors=selectors))
+    result.playlists_scanned = len(collections)
+
+    for coll in collections:
+        for raw in client.iter_items(coll):
+            result.songs_seen += 1
+            try:
+                songdata = adapter.to_songdata(raw)
+                ref = adapter.make_ref(raw)
+            except MappingError:
+                result.mapping_failures += 1
+                continue
+            except Exception as exc:
+                result.mapping_failures += 1
+                result.errors.append(str(exc))
+                continue
+
+            result.songs_mapped += 1
+            if ref.external_id:
+                if ref.external_id in seen_external_ids:
+                    result.duplicates_observed += 1
+                else:
+                    seen_external_ids.add(ref.external_id)
+
+            entries.append((songdata, ref))
+
+            if limit is not None and result.songs_mapped >= limit:
+                return PullSongsBatch(result=result, entries=entries)
+
+    return PullSongsBatch(result=result, entries=entries)
+
+
+def pull_playlists_batch(
+    client,
+    adapter,
+    *,
+    selectors: Optional[Sequence[str]] = None,
+    include_items: bool = False,
+    limit: Optional[int] = None,
+) -> PullPlaylistsBatch:
+    """Pull playlist objects into an in-memory batch with summary metrics."""
+
+    source_name = getattr(adapter, "source", "unknown")
+    result = PullSourceResult(source=source_name)
+    playlists = []
+
+    for playlist in iter_playlist_data(
+        client,
+        adapter,
+        selectors=selectors,
+        include_items=include_items,
+    ):
+        result.playlists_scanned += 1
+        playlists.append(playlist)
+
+        if limit is not None and result.playlists_scanned >= limit:
+            break
+
+    return PullPlaylistsBatch(result=result, playlists=playlists)
