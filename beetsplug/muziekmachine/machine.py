@@ -9,6 +9,10 @@ from beetsplug.muziekmachine.services.ingestion import (
     pull_playlists_batch,
     pull_source_batch,
 )
+from beetsplug.muziekmachine.services.matching_phase import (
+    build_playlist_match_plan,
+    build_song_match_plan,
+)
 from beetsplug.muziekmachine.services.playlist_ingestion import resolve_playlist_selectors
 from beetsplug.muziekmachine.sources.beets.mm_beets import BeetsBeetsPlugin
 from beetsplug.muziekmachine.sources.spotify.mm_spotify import SpotifyBeetsPlugin
@@ -37,12 +41,19 @@ class MuziekMachine(BeetsPlugin):
         self._add_common_pull_options(self.pull_songs)
         self.pull_songs.func = self._cmd_pull_songs
 
+        self.plan = Subcommand(
+            "mm-plan",
+            help="Run pull + matching planning pipeline in one command",
+        )
+        self._add_common_pull_options(self.plan)
+        self.plan.func = self._cmd_plan
+
         self.spotify = SpotifyBeetsPlugin()
         self.beets = BeetsBeetsPlugin()
         self.youtube = YoutubeBeetsPlugin()
 
     def commands(self):
-        return [self.pull_playlists, self.pull_songs]
+        return [self.pull_playlists, self.pull_songs, self.plan]
 
     def _add_common_pull_options(self, cmd: Subcommand) -> None:
         cmd.parser.add_option(
@@ -124,19 +135,6 @@ class MuziekMachine(BeetsPlugin):
             except Exception as exc:
                 self._log.error("[pull-songs:%s] failed: %s", source, exc)
 
-        print(batches[0])
-        print()
-        print(dir(batches[0]))
-
-        print()
-        print()
-
-        for songdata, ref in batches[0].entries:
-            print(songdata)
-            print(ref)
-            print()
-            print()
-
         return batches
 
     def _cmd_pull_playlists(self, lib, opts, args):
@@ -169,16 +167,38 @@ class MuziekMachine(BeetsPlugin):
                         limit=opts.limit,
                     )
                 self._log.info(
-                    f"[pull-playlists:{source}] playlists={batch.result.playlists_scanned}"
+                    "[pull-playlists:%s] playlists=%d",
+                    source,
+                    batch.result.playlists_scanned,
                 )
                 batches.append(batch)
             except Exception as exc:
-                self._log.error(f"[pull-playlists:{source}] failed: {exc}")
-
-
-        for pl in batches[0].playlists:
-            print(pl)
-            print()
-            print()
+                self._log.error("[pull-playlists:%s] failed: %s", source, exc)
 
         return batches
+
+    def _cmd_plan(self, lib, opts, args):
+        """Run pull + matching as a single in-memory planning pipeline."""
+        selectors = self._resolve_selectors(opts.playlist)
+        sources = self._resolve_platforms(opts.platform)
+
+        song_batches = self._cmd_pull_songs(lib, opts, args)
+        playlist_batches = self._cmd_pull_playlists(lib, opts, args)
+
+        song_plan = build_song_match_plan(song_batches, lib)
+        playlist_plan = build_playlist_match_plan(playlist_batches, song_plan)
+
+        self._log.info(
+            "[plan] sources=%s selectors=%s canonicals=%d assignments=%d playlist_targets=%d",
+            ",".join(sources),
+            ",".join(selectors) if selectors else "<all>",
+            len(song_plan.canonicals),
+            len(song_plan.assignments),
+            len(playlist_plan.targets),
+        )
+        return {
+            "song_batches": song_batches,
+            "playlist_batches": playlist_batches,
+            "song_plan": song_plan,
+            "playlist_plan": playlist_plan,
+        }
